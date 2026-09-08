@@ -1,0 +1,12 @@
+node_modules/
+.tools/
+vendor/
+dist/
+*.zip
+*.tar.gz
+.env*
+tests/.compiled.mjs
+upgrade.py
+enhancements.txt
+
+finalize.py
