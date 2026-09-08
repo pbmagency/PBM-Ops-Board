@@ -4214,6 +4214,20 @@ function loadData() {
     };
   }
 }
+function csrfRequestHeader() {
+  const cookie = document.cookie
+    .split("; ")
+    .find((entry) => entry.startsWith("XSRF-TOKEN="));
+  if (cookie) {
+    return {
+      "X-XSRF-TOKEN": decodeURIComponent(cookie.slice("XSRF-TOKEN=".length)),
+    };
+  }
+  return {
+    "X-CSRF-TOKEN":
+      document.querySelector('meta[name="csrf-token"]')?.content || "",
+  };
+}
 async function userRequest(url, method, payload) {
   const response = await fetch(url, {
     method,
@@ -4221,7 +4235,7 @@ async function userRequest(url, method, payload) {
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json",
-      "X-CSRF-TOKEN": document.querySelector('meta[name="csrf-token"]')?.content || "",
+      ...csrfRequestHeader(),
     },
     body: payload ? JSON.stringify(payload) : undefined,
   });
