@@ -5484,7 +5484,11 @@ function Login() {
                 <button
                   className="ops-button"
                   key={u.id}
-                  onClick={() => setEmail(u.email)}
+                  onClick={() => {
+                    setEmail(u.email);
+                    setPassword("password");
+                    setError("");
+                  }}
                   title={u.email}
                 >
                   {PIC[u.role].name}

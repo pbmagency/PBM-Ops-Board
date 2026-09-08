@@ -8,9 +8,17 @@ use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
 Route::get('/', function () {
-    $users = request()->user()?->role->value === 'coo'
-        ? User::query()->orderBy('id')->get(['id', 'email', 'role', 'active'])
-        : [];
+    $users = match (true) {
+        request()->user()?->role->value === 'coo' => User::query()
+            ->orderBy('id')
+            ->get(['id', 'email', 'role', 'active']),
+        request()->user() === null => User::query()
+            ->where('active', true)
+            ->whereIn('email', User::DEMO_EMAILS)
+            ->orderBy('id')
+            ->get(['id', 'email', 'role', 'active']),
+        default => [],
+    };
 
     $operations = request()->user()
         ? app(OperationsController::class)->allData()
