@@ -1,4 +1,7 @@
+// @ts-nocheck -- faithful port of the approved interactive MVP; typed Inertia props live at the page boundary.
 import { createContext, useContext, useEffect, useRef, useState } from "react";
+import TeamPerformance, { createTeamSeed } from "./TeamPerformance";
+import { router } from "@inertiajs/react";
 import {
   LayoutDashboard,
   LayoutGrid,
@@ -11,6 +14,7 @@ import {
   X,
   ChevronRight,
   ChevronLeft,
+  ChevronDown,
   CalendarDays,
   Flag,
   Zap,
@@ -22,6 +26,9 @@ import {
   ArrowUp,
   ArrowDown,
   ArrowUpDown,
+  Search,
+  Archive,
+  LogOut,
 } from "lucide-react";
 import {
   PieChart,
@@ -34,7 +41,6 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import { router } from "@inertiajs/react";
 
 /* PBM Ops v5 — interactive frontend prototype; local browser storage only. */
 
@@ -142,6 +148,25 @@ const PIC = {
     role: "Project Manager",
     initials: "PM",
     color: COLOR.emerald,
+  },
+  cmo: { name: "CMO", role: "CMO", initials: "CM", color: COLOR.violet },
+  "marketing-manager": {
+    name: "Marketing Manager",
+    role: "Marketing Manager",
+    initials: "MM",
+    color: COLOR.amber,
+  },
+  "content-specialist": {
+    name: "Content Specialist",
+    role: "Content Specialist",
+    initials: "CS",
+    color: COLOR.pink,
+  },
+  "appointment-setter": {
+    name: "Appointment Setter",
+    role: "Appointment Setter",
+    initials: "AS",
+    color: COLOR.sky,
   },
 };
 
@@ -1008,6 +1033,73 @@ function todayISO() {
 function isOverdue(task) {
   return task.status !== "done" && task.due < todayISO();
 }
+function taskCompletionDate(task) {
+  return task.completedAt || (task.status === "done" ? task.due : null);
+}
+function taskReportDue(task) {
+  return task.dueAtCompletion || task.due;
+}
+function dateShift(iso, days) {
+  const value = new Date(`${iso}T00:00:00`);
+  value.setDate(value.getDate() + days);
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+}
+export function deliveryPeriodBounds(anchor = todayISO(), mode = "weekly") {
+  validDate(anchor, "Tanggal laporan");
+  const value = new Date(`${anchor}T00:00:00`);
+  if (mode === "monthly") {
+    const start = `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-01`;
+    const end = new Date(value.getFullYear(), value.getMonth() + 1, 0);
+    return {
+      start,
+      end: `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}`,
+    };
+  }
+  const mondayOffset = (value.getDay() + 6) % 7;
+  const start = dateShift(anchor, -mondayOffset);
+  return { start, end: dateShift(start, 6) };
+}
+export function taskDeliveryReport(
+  tasks,
+  anchor = todayISO(),
+  mode = "weekly",
+  asOf = todayISO(),
+) {
+  const bounds = deliveryPeriodBounds(anchor, mode);
+  const scheduled = tasks.filter((task) => {
+    const due = taskReportDue(task);
+    return due >= bounds.start && due <= bounds.end;
+  });
+  const done = scheduled.filter((task) => task.status === "done");
+  const late = scheduled.filter((task) => {
+    const completed = taskCompletionDate(task);
+    return completed
+      ? completed > taskReportDue(task)
+      : taskReportDue(task) < asOf;
+  });
+  const onTime = done.filter(
+    (task) => taskCompletionDate(task) <= taskReportDue(task),
+  );
+  return {
+    ...bounds,
+    total: scheduled.length,
+    done: done.length,
+    onTime: onTime.length,
+    overdue: late.length,
+    outstanding: scheduled.length - done.length,
+    completionRate: scheduled.length
+      ? Math.round((done.length / scheduled.length) * 100)
+      : 0,
+    tasks: scheduled,
+  };
+}
+function doneTaskVisible(task, window) {
+  if (task.status !== "done" || window === "all") return true;
+  const completed = taskCompletionDate(task);
+  if (!completed) return false;
+  const bounds = deliveryPeriodBounds(todayISO(), window);
+  return completed >= bounds.start && completed <= bounds.end;
+}
 function daysUntil(iso) {
   const ms = new Date(`${iso}T00:00:00`) - new Date(`${todayISO()}T00:00:00`);
   return Math.round(ms / 86400000);
@@ -1329,6 +1421,76 @@ function KpiCard({
   );
 }
 
+function PageHeader({ icon: Icon, eyebrow, title, description, actions }) {
+  return (
+    <header className="flex flex-wrap items-start justify-between gap-4 border-b border-zinc-800 pb-5">
+      <div className="max-w-3xl">
+        <div
+          className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em]"
+          style={{ color: ACCENT }}
+        >
+          <Icon className="h-4 w-4" />
+          {eyebrow}
+        </div>
+        <h1
+          className="mt-2 text-2xl font-semibold text-zinc-50"
+          style={{ fontFamily: "'Space Grotesk', sans-serif" }}
+        >
+          {title}
+        </h1>
+        <p className="mt-2 text-sm leading-6 text-zinc-400">{description}</p>
+      </div>
+      {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
+    </header>
+  );
+}
+
+function SectionHeader({ title, description, action }) {
+  return (
+    <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h2 className="text-lg font-semibold text-zinc-100">{title}</h2>
+        {description && (
+          <p className="mt-1 text-sm text-zinc-500">{description}</p>
+        )}
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function Pager({ page, pageCount, total, from, to, onChange }) {
+  if (!total) return null;
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-800 px-4 py-3 text-sm text-zinc-500">
+      <span>
+        Menampilkan {from}–{to} dari {total} data
+      </span>
+      <div className="flex items-center gap-2">
+        <button
+          className="ops-button"
+          aria-label="Halaman sebelumnya"
+          disabled={page <= 1}
+          onClick={() => onChange(page - 1)}
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+        <span className="min-w-20 text-center text-zinc-300">
+          {page} / {pageCount}
+        </span>
+        <button
+          className="ops-button"
+          aria-label="Halaman berikutnya"
+          disabled={page >= pageCount}
+          onClick={() => onChange(page + 1)}
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* -------------------------- task card + cell (Execution Board) -------------------------- */
 
 function TaskCard({ task, dimmed, onClick }) {
@@ -1532,42 +1694,24 @@ function ClientProgressBar({ clientId }) {
   );
 }
 
-function PicFilterRow({ activePic, onToggle }) {
+function PicFilterSelect({ activePic, onChange }) {
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-2">
-      <span className="text-zinc-500" style={{ fontSize: 12 }}>
-        Filter PIC:
-      </span>
-      {Object.entries(PIC).map(([id, p]) => {
-        const active = activePic === id;
-        const dimmed = activePic && !active;
-        return (
-          <button
-            key={id}
-            onClick={() => onToggle(id)}
-            className="flex items-center gap-1.5 rounded-full border px-2 py-1 font-medium transition-opacity"
-            style={{
-              fontSize: 12,
-              borderColor: active ? p.color : "#27272a",
-              backgroundColor: active ? rgba(p.color, 0.12) : "transparent",
-              color: active ? p.color : "#a1a1aa",
-              opacity: dimmed ? 0.4 : 1,
-            }}
-          >
-            <PicChip id={id} />
-            {p.name}
-          </button>
-        );
-      })}
-      {activePic && (
-        <button
-          onClick={() => onToggle(null)}
-          className="text-xs text-zinc-500 underline decoration-dotted"
-        >
-          Reset
-        </button>
-      )}
-    </div>
+    <label className="mb-4 flex max-w-xs items-center gap-3 text-sm text-zinc-400">
+      <span className="shrink-0">Filter PIC</span>
+      <select
+        className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-zinc-200 focus:border-violet-500 focus:outline-none"
+        aria-label="Filter PIC execution board"
+        value={activePic || ""}
+        onChange={(event) => onChange(event.target.value || null)}
+      >
+        <option value="">Semua PIC</option>
+        {Object.entries(PIC).map(([id, person]) => (
+          <option key={id} value={id}>
+            {person.name}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
@@ -1914,6 +2058,7 @@ function ExecutionBoard({ highlightClient, onHighlightHandled }) {
   const { CLIENTS, TASKS, openEditor, moveTask, can } = useOps();
   const [viewMode, setViewMode] = useState("kanban");
   const [activePic, setActivePic] = useState(null);
+  const [doneWindow, setDoneWindow] = useState("weekly");
   const [pulseId, setPulseId] = useState(null);
   const [selectedTask, setSelectedTask] = useState(null);
   const rowRefs = useRef({});
@@ -1936,59 +2081,66 @@ function ExecutionBoard({ highlightClient, onHighlightHandled }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlightClient]);
 
+  const boardTasks = TASKS.filter((task) => doneTaskVisible(task, doneWindow));
+  const hiddenDoneCount = TASKS.filter(
+    (task) => task.status === "done" && !doneTaskVisible(task, doneWindow),
+  ).length;
   const statusCounts = derive(() => {
     const m = {};
     STATUSES.forEach((s) => {
-      m[s.id] = TASKS.filter((t) => t.status === s.id).length;
+      m[s.id] = boardTasks.filter((t) => t.status === s.id).length;
     });
     return m;
   }, []);
 
   const gridTemplate = `210px repeat(${STATUSES.length}, minmax(190px, 1fr))`;
 
-  function togglePic(id) {
-    setActivePic((prev) => (prev === id ? null : id));
-  }
-
   return (
-    <section>
-      <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <div
-            className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider"
-            style={{ color: ACCENT }}
-          >
-            <LayoutGrid className="h-3.5 w-3.5" />
-            Monthly Execution Board
-          </div>
-          <h1
-            className="mt-1 text-2xl font-semibold text-zinc-50"
-            style={{ fontFamily: "'Space Grotesk', sans-serif" }}
-          >
-            Semua task, per client, per tahap
-          </h1>
-          <p className="mt-1 text-sm text-zinc-500">
-            Klik task mana pun untuk lihat brief lengkapnya.
-          </p>
-        </div>
-        <ViewToggle mode={viewMode} onChange={setViewMode} />
-      </header>
+    <section className="space-y-5">
+      <PageHeader
+        icon={LayoutGrid}
+        eyebrow="Execution Board"
+        title="Task delivery per client dan tahap"
+        description="Pantau pekerjaan aktif, pindahkan status, dan buka detail task. Task selesai lama tetap tersimpan untuk laporan, tetapi disembunyikan dari board secara otomatis."
+        actions={<ViewToggle mode={viewMode} onChange={setViewMode} />}
+      />
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        {can("create", "tasks") && (
-          <button
-            className="ops-button ops-primary"
-            disabled={!CLIENTS.length}
-            onClick={() => openEditor("tasks")}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          {can("create", "tasks") && (
+            <button
+              className="ops-button ops-primary"
+              disabled={!CLIENTS.length}
+              onClick={() => openEditor("tasks")}
+            >
+              + Tambah task
+            </button>
+          )}
+          <span className="self-center text-sm text-zinc-400">
+            {can("update", "tasks")
+              ? "Tarik kartu ke kolom lain, atau ubah status melalui detail task."
+              : "Akses read-only sesuai role Anda."}
+          </span>
+        </div>
+        <label className="flex items-center gap-2 text-sm text-zinc-400">
+          <Archive className="h-4 w-4 text-zinc-500" />
+          Task Done
+          <select
+            className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-200 focus:border-violet-500 focus:outline-none"
+            aria-label="Tampilkan task Done"
+            value={doneWindow}
+            onChange={(event) => setDoneWindow(event.target.value)}
           >
-            + Tambah task
-          </button>
-        )}
-        <span className="self-center text-sm text-zinc-400">
-          {can("update", "tasks")
-            ? "Tarik kartu ke kolom lain, atau ubah status melalui detail task."
-            : "Akses read-only sesuai role Anda."}
-        </span>
+            <option value="weekly">Minggu ini</option>
+            <option value="monthly">Bulan ini</option>
+            <option value="all">Semua riwayat</option>
+          </select>
+          {hiddenDoneCount > 0 && (
+            <span className="rounded-full bg-zinc-800 px-2 py-1 text-xs text-zinc-500">
+              {hiddenDoneCount} tersimpan
+            </span>
+          )}
+        </label>
       </div>
       {!CLIENTS.length && (
         <p className="ops-empty">
@@ -1996,7 +2148,7 @@ function ExecutionBoard({ highlightClient, onHighlightHandled }) {
         </p>
       )}
       <HotfixBanner tasks={TASKS} onOpenTask={setSelectedTask} />
-      <PicFilterRow activePic={activePic} onToggle={togglePic} />
+      <PicFilterSelect activePic={activePic} onChange={setActivePic} />
 
       {viewMode === "kanban" ? (
         <div className="overflow-x-auto rounded-xl border border-zinc-800">
@@ -2023,7 +2175,9 @@ function ExecutionBoard({ highlightClient, onHighlightHandled }) {
             </div>
 
             {CLIENTS.map((client) => {
-              const clientTasks = TASKS.filter((t) => t.client === client.id);
+              const clientTasks = boardTasks.filter(
+                (t) => t.client === client.id,
+              );
               const openCount = clientTasks.filter(
                 (t) => t.status !== "done",
               ).length;
@@ -2448,6 +2602,161 @@ function AtRiskList({ filter, onClearFilter }) {
 
 /* -------------------------- Executive Operations Hub -------------------------- */
 
+function DeliveryReport({ tasks }) {
+  const [mode, setMode] = useState("weekly");
+  const [anchor, setAnchor] = useState(todayISO());
+  const report = taskDeliveryReport(tasks, anchor, mode);
+  const roleRows = Object.keys(PIC)
+    .map((role) => ({
+      role,
+      ...taskDeliveryReport(
+        tasks.filter((task) => task.pic === role),
+        anchor,
+        mode,
+      ),
+    }))
+    .filter((row) => row.total > 0);
+  const periodLabel = `${new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "short", year: "numeric" }).format(new Date(`${report.start}T00:00:00`))} – ${new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "short", year: "numeric" }).format(new Date(`${report.end}T00:00:00`))}`;
+
+  function shiftPeriod(offset) {
+    if (mode === "weekly") {
+      setAnchor(dateShift(anchor, offset * 7));
+      return;
+    }
+    const value = new Date(`${anchor}T00:00:00`);
+    value.setDate(1);
+    value.setMonth(value.getMonth() + offset);
+    setAnchor(
+      `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-01`,
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/55 p-5">
+      <SectionHeader
+        title="Laporan Delivery"
+        description="Total task dihitung berdasarkan deadline pada periode terpilih. Task selesai tidak dihapus agar hasil mingguan dan bulanan tetap dapat dievaluasi."
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-200"
+              aria-label="Periode laporan delivery"
+              value={mode}
+              onChange={(event) => setMode(event.target.value)}
+            >
+              <option value="weekly">Mingguan</option>
+              <option value="monthly">Bulanan</option>
+            </select>
+            <button
+              className="ops-button"
+              aria-label="Periode sebelumnya"
+              onClick={() => shiftPeriod(-1)}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <input
+              className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-200"
+              aria-label="Tanggal acuan laporan delivery"
+              type="date"
+              value={anchor}
+              onChange={(event) => setAnchor(event.target.value)}
+            />
+            <button
+              className="ops-button"
+              aria-label="Periode berikutnya"
+              onClick={() => shiftPeriod(1)}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        }
+      />
+      <p className="mb-4 text-sm font-medium text-violet-300">{periodLabel}</p>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <KpiCard
+          icon={ListTodo}
+          label="Total Task"
+          value={report.total}
+          hint="Deadline di periode ini"
+        />
+        <KpiCard
+          icon={CheckCircle2}
+          label="Task Done"
+          value={report.done}
+          hint={`${report.completionRate}% selesai`}
+          color={COLOR.emerald}
+        />
+        <KpiCard
+          icon={Flag}
+          label="Selesai Tepat Waktu"
+          value={report.onTime}
+          hint="Completed ≤ deadline"
+          color={COLOR.sky}
+        />
+        <KpiCard
+          icon={AlertTriangle}
+          label="Over Deadline"
+          value={report.overdue}
+          hint="Terlambat atau belum selesai"
+          color={COLOR.rose}
+        />
+        <KpiCard
+          icon={Clock}
+          label="Belum Selesai"
+          value={report.outstanding}
+          hint="Carry-over periode"
+          color={COLOR.amber}
+        />
+      </div>
+      <div className="mt-5 overflow-x-auto rounded-lg border border-zinc-800">
+        <table className="w-full min-w-[620px] text-left text-sm">
+          <thead className="bg-zinc-950/70 text-xs uppercase tracking-wide text-zinc-500">
+            <tr>
+              <th className="px-4 py-3 font-medium">Role</th>
+              <th className="px-4 py-3 font-medium">Total</th>
+              <th className="px-4 py-3 font-medium">Done</th>
+              <th className="px-4 py-3 font-medium">Tepat waktu</th>
+              <th className="px-4 py-3 font-medium">Over deadline</th>
+              <th className="px-4 py-3 font-medium">Belum selesai</th>
+            </tr>
+          </thead>
+          <tbody>
+            {roleRows.map((row) => (
+              <tr key={row.role} className="border-t border-zinc-800">
+                <td className="px-4 py-3 font-medium text-zinc-200">
+                  {PIC[row.role].name}
+                </td>
+                <td className="px-4 py-3 tabular-nums text-zinc-400">
+                  {row.total}
+                </td>
+                <td className="px-4 py-3 tabular-nums text-emerald-300">
+                  {row.done}
+                </td>
+                <td className="px-4 py-3 tabular-nums text-sky-300">
+                  {row.onTime}
+                </td>
+                <td className="px-4 py-3 tabular-nums text-rose-300">
+                  {row.overdue}
+                </td>
+                <td className="px-4 py-3 tabular-nums text-amber-300">
+                  {row.outstanding}
+                </td>
+              </tr>
+            ))}
+            {!roleRows.length && (
+              <tr>
+                <td colSpan={6} className="px-4 py-8 text-center text-zinc-600">
+                  Tidak ada task dengan deadline pada periode ini.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function ExecutiveHub({ onGoToClient }) {
   const { CLIENTS, TASKS } = useOps();
   const [riskFilter, setRiskFilter] = useState("all");
@@ -2466,24 +2775,12 @@ function ExecutiveHub({ onGoToClient }) {
 
   return (
     <section className="space-y-8">
-      <header>
-        <div
-          className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider"
-          style={{ color: ACCENT }}
-        >
-          <LayoutDashboard className="h-3.5 w-3.5" />
-          Executive Operations Hub
-        </div>
-        <h1
-          className="mt-1 text-2xl font-semibold text-zinc-50"
-          style={{ fontFamily: "'Space Grotesk', sans-serif" }}
-        >
-          Command center harian
-        </h1>
-        <p className="mt-1 text-sm text-zinc-500">
-          Ringkasan performa retainer aktif dan task yang butuh perhatian.
-        </p>
-      </header>
+      <PageHeader
+        icon={LayoutDashboard}
+        eyebrow="Operations Hub"
+        title="Command center delivery"
+        description="Lihat kondisi operasional hari ini, laporan task per periode, workload tim, dan client yang membutuhkan keputusan."
+      />
 
       <div>
         <div className="mb-3 flex items-center gap-2">
@@ -2534,6 +2831,8 @@ function ExecutiveHub({ onGoToClient }) {
           />
         </div>
       </div>
+
+      <DeliveryReport tasks={TASKS} />
 
       <div>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -2703,47 +3002,41 @@ function CycleLogFilters({
   onClientChange,
   onStatusChange,
 }) {
-  const { CLIENTS, CLIENT_COLOR } = useOps();
+  const { CLIENTS } = useOps();
   return (
-    <div className="mb-4 space-y-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-zinc-500" style={{ fontSize: 12, width: 52 }}>
-          Client
-        </span>
-        <FilterChip
-          active={clientFilter === null}
-          label="Semua Client"
-          onClick={() => onClientChange(null)}
-        />
-        {CLIENTS.map((c) => (
-          <FilterChip
-            key={c.id}
-            active={clientFilter === c.id}
-            label={c.name}
-            color={CLIENT_COLOR[c.id]}
-            onClick={() => onClientChange(c.id)}
-          />
-        ))}
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-zinc-500" style={{ fontSize: 12, width: 52 }}>
-          Status
-        </span>
-        <FilterChip
-          active={statusFilter === null}
-          label="Semua Status"
-          onClick={() => onStatusChange(null)}
-        />
-        {CYCLE_STATUSES.map((s) => (
-          <FilterChip
-            key={s}
-            active={statusFilter === s}
-            label={s}
-            color={CYCLE_STATUS_COLOR[s]}
-            onClick={() => onStatusChange(s)}
-          />
-        ))}
-      </div>
+    <div className="mb-4 flex flex-wrap gap-3 rounded-xl border border-zinc-800 bg-zinc-900/55 p-4">
+      <label className="grid gap-1.5 text-xs font-medium uppercase tracking-wide text-zinc-500">
+        Client
+        <select
+          className="min-w-52 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm normal-case tracking-normal text-zinc-200"
+          aria-label="Filter client cycle log"
+          value={clientFilter || ""}
+          onChange={(event) => onClientChange(event.target.value || null)}
+        >
+          <option value="">Semua client</option>
+          {CLIENTS.map((client) => (
+            <option key={client.id} value={client.id}>
+              {client.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="grid gap-1.5 text-xs font-medium uppercase tracking-wide text-zinc-500">
+        Status
+        <select
+          className="min-w-44 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm normal-case tracking-normal text-zinc-200"
+          aria-label="Filter status cycle log"
+          value={statusFilter || ""}
+          onChange={(event) => onStatusChange(event.target.value || null)}
+        >
+          <option value="">Semua status</option>
+          {CYCLE_STATUSES.map((status) => (
+            <option key={status} value={status}>
+              {status}
+            </option>
+          ))}
+        </select>
+      </label>
     </div>
   );
 }
@@ -2760,22 +3053,59 @@ function CycleLogRow({ cycle: c, expanded, onToggle }) {
         className="cursor-pointer border-b border-zinc-900 hover:bg-zinc-900"
         title="Klik untuk lihat breakdown per varian"
       >
-        <td className="p-2.5">
+        <td className="p-3">
           <ChevronRight
             className="h-3.5 w-3.5 text-zinc-600 transition-transform"
             style={{ transform: expanded ? "rotate(90deg)" : "none" }}
           />
         </td>
         <td
-          className="p-2.5 font-medium text-zinc-100"
+          className="p-3 font-medium text-zinc-100"
           style={{
             borderLeftWidth: 3,
             borderLeftColor: CLIENT_COLOR[c.clientId],
           }}
         >
           {c.clientName}
+        </td>
+        <td className="p-3">
+          <CycleTag cycle={c.cycle} />
+        </td>
+        <td className="whitespace-nowrap p-3 text-zinc-400">{c.periode}</td>
+        <td className="p-3">
+          <p className="font-medium tabular-nums text-zinc-100">
+            {c.leadRate != null ? `${c.leadRate}% lead` : "Belum terukur"}
+          </p>
+          <p className="mt-1 text-xs text-zinc-500">
+            {c.realVisit ?? "—"} visit · {testVariantCount(c)} varian uji
+          </p>
+        </td>
+        <td className="p-3">
+          <p className="text-zinc-300">{c.layer || "—"}</p>
+          <p
+            className="mt-1 max-w-56 truncate text-xs text-zinc-500"
+            title={c.bottleneck}
+          >
+            {c.bottleneck || "Tanpa bottleneck"}
+          </p>
+        </td>
+        <td className="p-3">
+          <span
+            className="rounded-full px-2 py-0.5 font-medium"
+            style={{ ...pillStyle(accent), fontSize: 10 }}
+          >
+            {c.status}
+          </span>
+          <div className="mt-2">
+            <DeltaTag value={deltaPP(c.leadRate, c.prevLeadRate)} />
+          </div>
+        </td>
+        <td className="whitespace-nowrap p-3 text-zinc-500">
+          {formatDate(c.updateDate)}
+        </td>
+        <td className="p-3 text-right">
           {can("update", "cycles") && (
-            <div className="mt-2 flex gap-1">
+            <div className="flex justify-end gap-1">
               <button
                 className="ops-button"
                 onClick={(e) => {
@@ -2800,67 +3130,41 @@ function CycleLogRow({ cycle: c, expanded, onToggle }) {
             </div>
           )}
         </td>
-        <td className="p-2.5">
-          <CycleTag cycle={c.cycle} />
-        </td>
-        <td className="whitespace-nowrap p-2.5 text-zinc-400">{c.periode}</td>
-        <td className="p-2.5 text-zinc-400">{testVariantCount(c)}</td>
-        <td className="p-2.5 tabular-nums text-zinc-400">
-          {c.targetVisit ?? "—"}
-        </td>
-        <td className="p-2.5 tabular-nums text-zinc-400">
-          {c.realVisit ?? "—"}
-        </td>
-        <td className="p-2.5 tabular-nums text-zinc-400">
-          {c.bounceRate != null ? `${c.bounceRate}%` : "—"}
-        </td>
-        <td className="p-2.5 tabular-nums font-medium text-zinc-100">
-          {c.leadRate != null ? `${c.leadRate}%` : "—"}
-        </td>
-        <td className="p-2.5 tabular-nums text-zinc-400">
-          {c.intentRate != null ? `${c.intentRate}%` : "—"}
-        </td>
-        <td className="p-2.5 text-zinc-400">{c.layer}</td>
-        <td
-          className="truncate p-2.5 text-zinc-500"
-          style={{ maxWidth: 190 }}
-          title={c.bottleneck}
-        >
-          {c.bottleneck}
-        </td>
-        <td className="p-2.5 text-zinc-400">{c.primaryMetric}</td>
-        <td
-          className="truncate p-2.5 text-zinc-500"
-          style={{ maxWidth: 210 }}
-          title={c.hypothesis}
-        >
-          {c.hypothesis}
-        </td>
-        <td
-          className="truncate p-2.5 text-zinc-500"
-          style={{ maxWidth: 210 }}
-          title={c.optimization}
-        >
-          {c.optimization}
-        </td>
-        <td className="whitespace-nowrap p-2.5 text-zinc-500">
-          {formatDate(c.updateDate)}
-        </td>
-        <td className="p-2.5">
-          <DeltaTag value={deltaPP(c.leadRate, c.prevLeadRate)} />
-        </td>
-        <td className="p-2.5">
-          <span
-            className="rounded-full px-2 py-0.5 font-medium"
-            style={{ ...pillStyle(accent), fontSize: 10 }}
-          >
-            {c.status}
-          </span>
-        </td>
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={18} className="p-0">
+          <td colSpan={9} className="p-0">
+            <div className="grid gap-4 border-t border-zinc-800 bg-zinc-950 px-5 py-4 text-sm md:grid-cols-2 xl:grid-cols-4">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-zinc-600">
+                  Traffic
+                </p>
+                <p className="mt-1 text-zinc-300">
+                  Target {c.targetVisit ?? "—"} · Real {c.realVisit ?? "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-zinc-600">
+                  Rates
+                </p>
+                <p className="mt-1 text-zinc-300">
+                  Bounce {c.bounceRate ?? "—"}% · Lead {c.leadRate ?? "—"}% ·
+                  Intent {c.intentRate ?? "—"}%
+                </p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-zinc-600">
+                  Hipotesis
+                </p>
+                <p className="mt-1 text-zinc-300">{c.hypothesis || "—"}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-zinc-600">
+                  Optimasi
+                </p>
+                <p className="mt-1 text-zinc-300">{c.optimization || "—"}</p>
+              </div>
+            </div>
             <VariantTable variants={c.variants} />
           </td>
         </tr>
@@ -2876,6 +3180,9 @@ function CycleLogRow({ cycle: c, expanded, onToggle }) {
 function CycleLogTable({ clientFilter, statusFilter }) {
   const { CLIENTS, cyclesFor } = useOps();
   const [expandedId, setExpandedId] = useState(null);
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const pageSize = 8;
 
   const rows = derive(() => {
     let items = CLIENTS.flatMap((client) => {
@@ -2889,57 +3196,96 @@ function CycleLogTable({ clientFilter, statusFilter }) {
     });
     if (clientFilter) items = items.filter((r) => r.clientId === clientFilter);
     if (statusFilter) items = items.filter((r) => r.status === statusFilter);
+    if (query.trim()) {
+      const needle = query.trim().toLowerCase();
+      items = items.filter((item) =>
+        [
+          item.clientName,
+          item.periode,
+          item.layer,
+          item.bottleneck,
+          item.hypothesis,
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(needle),
+      );
+    }
     return items.sort((a, b) => b.updateDate.localeCompare(a.updateDate));
-  }, [clientFilter, statusFilter]);
+  }, [clientFilter, statusFilter, query]);
+  const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
+  const safePage = Math.min(page, pageCount);
+  const visibleRows = rows.slice(
+    (safePage - 1) * pageSize,
+    safePage * pageSize,
+  );
+
+  useEffect(() => setPage(1), [clientFilter, statusFilter, query]);
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-zinc-800">
-      <table
-        className="border-collapse text-sm"
-        style={{ width: "100%", minWidth: 2520 }}
-      >
-        <thead>
-          <tr className="border-b border-zinc-800 text-left text-xs uppercase tracking-wide text-zinc-500">
-            <th className="p-2.5" style={{ width: 28 }} />
-            <th className="p-2.5 font-medium">Client</th>
-            <th className="p-2.5 font-medium">Cycle</th>
-            <th className="p-2.5 font-medium">Periode</th>
-            <th className="p-2.5 font-medium">Varian Uji</th>
-            <th className="p-2.5 font-medium">Target Visit</th>
-            <th className="p-2.5 font-medium">Real Visit</th>
-            <th className="p-2.5 font-medium">Bounce Rate</th>
-            <th className="p-2.5 font-medium">Lead Rate</th>
-            <th className="p-2.5 font-medium">Intent Rate</th>
-            <th className="p-2.5 font-medium">Layer Aktif</th>
-            <th className="p-2.5 font-medium">Bottleneck</th>
-            <th className="p-2.5 font-medium">Metrik Primer</th>
-            <th className="p-2.5 font-medium">Hipotesis</th>
-            <th className="p-2.5 font-medium">Optimasi Dilakukan</th>
-            <th className="p-2.5 font-medium">Tanggal Update</th>
-            <th className="p-2.5 font-medium">Selisih Lead CR</th>
-            <th className="p-2.5 font-medium">Status Improvement</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((c) => (
-            <CycleLogRow
-              key={c.id}
-              cycle={c}
-              expanded={expandedId === c.id}
-              onToggle={() =>
-                setExpandedId((prev) => (prev === c.id ? null : c.id))
-              }
-            />
-          ))}
-          {rows.length === 0 && (
-            <tr>
-              <td colSpan={18} className="p-8 text-center text-zinc-600">
-                Tidak ada cycle yang cocok dengan filter ini.
-              </td>
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 p-4">
+        <label className="relative block w-full max-w-md">
+          <Search className="absolute left-3 top-2.5 h-4 w-4 text-zinc-600" />
+          <input
+            className="w-full rounded-lg border border-zinc-700 bg-zinc-950 py-2 pl-9 pr-3 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
+            aria-label="Cari cycle log"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Cari client, periode, layer, atau hipotesis"
+          />
+        </label>
+        <span className="text-sm text-zinc-500">
+          {rows.length} cycle ditemukan
+        </span>
+      </div>
+      <div className="overflow-x-auto">
+        <table
+          className="border-collapse text-sm"
+          style={{ width: "100%", minWidth: 1080 }}
+        >
+          <thead>
+            <tr className="border-b border-zinc-800 text-left text-xs uppercase tracking-wide text-zinc-500">
+              <th className="p-2.5" style={{ width: 28 }} />
+              <th className="p-2.5 font-medium">Client</th>
+              <th className="p-2.5 font-medium">Cycle</th>
+              <th className="p-2.5 font-medium">Periode</th>
+              <th className="p-2.5 font-medium">Performance</th>
+              <th className="p-2.5 font-medium">Fokus Saat Ini</th>
+              <th className="p-2.5 font-medium">Status</th>
+              <th className="p-2.5 font-medium">Tanggal Update</th>
+              <th className="p-2.5 font-medium text-right">Aksi</th>
             </tr>
-          )}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {visibleRows.map((c) => (
+              <CycleLogRow
+                key={c.id}
+                cycle={c}
+                expanded={expandedId === c.id}
+                onToggle={() =>
+                  setExpandedId((prev) => (prev === c.id ? null : c.id))
+                }
+              />
+            ))}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={9} className="p-8 text-center text-zinc-600">
+                  Tidak ada cycle yang cocok dengan filter ini.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <Pager
+        page={safePage}
+        pageCount={pageCount}
+        total={rows.length}
+        from={(safePage - 1) * pageSize + 1}
+        to={Math.min(safePage * pageSize, rows.length)}
+        onChange={setPage}
+      />
     </div>
   );
 }
@@ -2953,27 +3299,29 @@ function CycleLogSection({
 }) {
   const { CLIENTS, openEditor, can } = useOps();
   return (
-    <div ref={sectionRef}>
-      <div className="mb-3 flex flex-wrap justify-between gap-2">
-        <h2 className="text-lg font-medium text-zinc-100">Cycle Log</h2>
-        {can("create", "cycles") && (
-          <button
-            className="ops-button ops-primary"
-            disabled={!CLIENTS.length}
-            onClick={() =>
-              openEditor("cycles", null, {
-                client: clientFilter || CLIENTS[0]?.id,
-              })
-            }
-          >
-            + Tambah cycle log
-          </button>
-        )}
-      </div>
-      <p className="mb-3 text-zinc-500" style={{ fontSize: 12.5 }}>
-        Riwayat lengkap semua cycle, semua client. Klik row untuk lihat
-        breakdown per varian (termasuk control).
-      </p>
+    <div
+      ref={sectionRef}
+      className="rounded-xl border border-zinc-800 bg-zinc-900/45 p-5"
+    >
+      <SectionHeader
+        title="Cycle Log"
+        description="Riwayat cycle terbaru ditampilkan lebih dulu. Cari atau filter data, lalu klik row untuk membuka detail dan seluruh varian."
+        action={
+          can("create", "cycles") && (
+            <button
+              className="ops-button ops-primary"
+              disabled={!CLIENTS.length}
+              onClick={() =>
+                openEditor("cycles", null, {
+                  client: clientFilter || CLIENTS[0]?.id,
+                })
+              }
+            >
+              + Tambah cycle log
+            </button>
+          )
+        }
+      />
       <CycleLogFilters
         clientFilter={clientFilter}
         statusFilter={statusFilter}
@@ -3408,41 +3756,23 @@ function KpiDashboard() {
 
   return (
     <section className="space-y-6">
-      <header>
-        <div
-          className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider"
-          style={{ color: ACCENT }}
-        >
-          <TrendingUp className="h-3.5 w-3.5" />
-          KPI Dashboard
-        </div>
-        <h1
-          className="mt-1 text-2xl font-semibold text-zinc-50"
-          style={{ fontFamily: "'Space Grotesk', sans-serif" }}
-        >
-          Marketing performance — semua client, satu layar
-        </h1>
-        <p className="mt-1 text-sm text-zinc-500">
-          Data performa landing page tiap client per cycle, tanpa perlu buka
-          admin panel analytics satu-satu. Klik row untuk buka riwayatnya di
-          Cycle Log.
-        </p>
-      </header>
-
-      <div className="flex flex-wrap gap-2">
-        {can("create", "cycles") && (
-          <button
-            className="ops-button ops-primary"
-            disabled={!CLIENTS.length}
-            onClick={() => openEditor("cycles")}
-          >
-            + Tambah cycle KPI
-          </button>
-        )}
-        <p className="self-center text-sm text-zinc-400">
-          Cycle KPI dan Cycle Log memakai data yang sama.
-        </p>
-      </div>
+      <PageHeader
+        icon={TrendingUp}
+        eyebrow="Client Performance KPI"
+        title="Performa client per cycle"
+        description="Bandingkan hasil landing page, temukan client yang perlu intervensi, lalu buka Cycle Log untuk melihat detail dan varian pengujian."
+        actions={
+          can("create", "cycles") && (
+            <button
+              className="ops-button ops-primary"
+              disabled={!CLIENTS.length}
+              onClick={() => openEditor("cycles")}
+            >
+              + Tambah cycle KPI
+            </button>
+          )
+        }
+      />
       {!CLIENTS.length && (
         <p className="ops-empty">
           Belum ada client. Tambahkan client untuk mulai mencatat cycle.
@@ -3513,66 +3843,65 @@ function FeedbackFilters({
   onPhaseChange,
   onPriorityChange,
 }) {
-  const { CLIENTS, CLIENT_COLOR } = useOps();
+  const { CLIENTS } = useOps();
   return (
-    <div className="mb-4 space-y-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-zinc-500" style={{ fontSize: 12, width: 52 }}>
-          Client
-        </span>
-        <FilterChip
-          active={clientFilter === null}
-          label="Semua Client"
-          onClick={() => onClientChange(null)}
-        />
-        {CLIENTS.map((c) => (
-          <FilterChip
-            key={c.id}
-            active={clientFilter === c.id}
-            label={c.name}
-            color={CLIENT_COLOR[c.id]}
-            onClick={() => onClientChange(c.id)}
-          />
-        ))}
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-zinc-500" style={{ fontSize: 12, width: 52 }}>
-          Fase
-        </span>
-        <FilterChip
-          active={phaseFilter === null}
-          label="Semua Fase"
-          onClick={() => onPhaseChange(null)}
-        />
-        {[30, 50, 90].map((p) => (
-          <FilterChip
-            key={p}
-            active={phaseFilter === p}
-            label={PHASE_META[p].label}
-            color={PHASE_META[p].color}
-            onClick={() => onPhaseChange(p)}
-          />
-        ))}
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-zinc-500" style={{ fontSize: 12, width: 52 }}>
-          Priority
-        </span>
-        <FilterChip
-          active={priorityFilter === null}
-          label="Semua Priority"
-          onClick={() => onPriorityChange(null)}
-        />
-        {[1, 2, 3].map((p) => (
-          <FilterChip
-            key={p}
-            active={priorityFilter === p}
-            label={PRIORITY_META[p].label}
-            color={PRIORITY_META[p].color}
-            onClick={() => onPriorityChange(p)}
-          />
-        ))}
-      </div>
+    <div className="mb-4 grid gap-3 rounded-xl border border-zinc-800 bg-zinc-900/55 p-4 sm:grid-cols-3">
+      <label className="grid gap-1.5 text-xs font-medium uppercase tracking-wide text-zinc-500">
+        Client
+        <select
+          className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm normal-case tracking-normal text-zinc-200"
+          aria-label="Filter client feedback"
+          value={clientFilter || ""}
+          onChange={(event) => onClientChange(event.target.value || null)}
+        >
+          <option value="">Semua client</option>
+          {CLIENTS.map((client) => (
+            <option key={client.id} value={client.id}>
+              {client.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="grid gap-1.5 text-xs font-medium uppercase tracking-wide text-zinc-500">
+        Checkpoint
+        <select
+          className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm normal-case tracking-normal text-zinc-200"
+          aria-label="Filter checkpoint feedback"
+          value={phaseFilter || ""}
+          onChange={(event) =>
+            onPhaseChange(
+              event.target.value ? Number(event.target.value) : null,
+            )
+          }
+        >
+          <option value="">Semua checkpoint</option>
+          {[30, 50, 90].map((phase) => (
+            <option key={phase} value={phase}>
+              {PHASE_META[phase].label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="grid gap-1.5 text-xs font-medium uppercase tracking-wide text-zinc-500">
+        Prioritas
+        <select
+          className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm normal-case tracking-normal text-zinc-200"
+          aria-label="Filter prioritas feedback"
+          value={priorityFilter || ""}
+          onChange={(event) =>
+            onPriorityChange(
+              event.target.value ? Number(event.target.value) : null,
+            )
+          }
+        >
+          <option value="">Semua prioritas</option>
+          {[1, 2, 3].map((priority) => (
+            <option key={priority} value={priority}>
+              {PRIORITY_META[priority].label}
+            </option>
+          ))}
+        </select>
+      </label>
     </div>
   );
 }
@@ -3587,6 +3916,10 @@ function FeedbackTable({ clientFilter, phaseFilter, priorityFilter }) {
     askDelete,
     can,
   } = useOps();
+  const [query, setQuery] = useState("");
+  const [actionFilter, setActionFilter] = useState("all");
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
   const rows = derive(() => {
     let items = FEEDBACK.map((f) => ({
       ...f,
@@ -3596,140 +3929,199 @@ function FeedbackTable({ clientFilter, phaseFilter, priorityFilter }) {
     if (phaseFilter) items = items.filter((f) => f.phase === phaseFilter);
     if (priorityFilter)
       items = items.filter((f) => f.priority === priorityFilter);
+    if (actionFilter === "open") items = items.filter((f) => !f.action);
+    if (actionFilter === "done") items = items.filter((f) => Boolean(f.action));
+    if (query.trim()) {
+      const needle = query.trim().toLowerCase();
+      items = items.filter((item) =>
+        [item.clientName, item.from, item.topic, item.details, item.action]
+          .join(" ")
+          .toLowerCase()
+          .includes(needle),
+      );
+    }
     return items.sort((a, b) => b.date.localeCompare(a.date));
-  }, [clientFilter, phaseFilter, priorityFilter]);
+  }, [clientFilter, phaseFilter, priorityFilter, actionFilter, query]);
+  const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
+  const safePage = Math.min(page, pageCount);
+  const visibleRows = rows.slice(
+    (safePage - 1) * pageSize,
+    safePage * pageSize,
+  );
+
+  useEffect(
+    () => setPage(1),
+    [clientFilter, phaseFilter, priorityFilter, actionFilter, query],
+  );
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-zinc-800">
-      <table
-        className="border-collapse text-sm"
-        style={{ width: "100%", minWidth: 1240 }}
-      >
-        <thead>
-          <tr className="border-b border-zinc-800 text-left text-xs uppercase tracking-wide text-zinc-500">
-            <th className="p-3 font-medium">Client</th>
-            <th className="p-3 font-medium">Fase</th>
-            <th className="p-3 font-medium">Date</th>
-            <th className="p-3 font-medium">From</th>
-            <th className="p-3 font-medium">Topic</th>
-            <th className="p-3 font-medium">Feedback Details</th>
-            <th className="p-3 font-medium">Priority</th>
-            <th className="p-3 font-medium">Action Taken</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((f) => {
-            const pMeta = PRIORITY_META[f.priority];
-            const phaseMeta = PHASE_META[f.phase];
-            return (
-              <tr
-                key={f.id}
-                className="border-b border-zinc-900 last:border-0 hover:bg-zinc-900"
-              >
-                <td
-                  className="p-3 font-medium text-zinc-100"
-                  style={{ borderLeftWidth: 3, borderLeftColor: pMeta.color }}
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 p-4">
+        <label className="relative block w-full max-w-md">
+          <Search className="absolute left-3 top-2.5 h-4 w-4 text-zinc-600" />
+          <input
+            className="w-full rounded-lg border border-zinc-700 bg-zinc-950 py-2 pl-9 pr-3 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none"
+            aria-label="Cari feedback"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Cari client, topik, detail, atau tindak lanjut"
+          />
+        </label>
+        <div className="flex items-center gap-3">
+          <select
+            className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-200"
+            aria-label="Filter tindak lanjut feedback"
+            value={actionFilter}
+            onChange={(event) => setActionFilter(event.target.value)}
+          >
+            <option value="all">Semua tindak lanjut</option>
+            <option value="open">Belum ditindaklanjuti</option>
+            <option value="done">Sudah ditindaklanjuti</option>
+          </select>
+          <span className="text-sm text-zinc-500">{rows.length} feedback</span>
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table
+          className="border-collapse text-sm"
+          style={{ width: "100%", minWidth: 1040 }}
+        >
+          <thead>
+            <tr className="border-b border-zinc-800 text-left text-xs uppercase tracking-wide text-zinc-500">
+              <th className="p-3 font-medium">Client & Checkpoint</th>
+              <th className="p-3 font-medium">Feedback</th>
+              <th className="p-3 font-medium">From</th>
+              <th className="p-3 font-medium">Priority</th>
+              <th className="p-3 font-medium">Tindak Lanjut</th>
+              <th className="p-3 font-medium text-right">Aksi</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visibleRows.map((f) => {
+              const pMeta = PRIORITY_META[f.priority];
+              const phaseMeta = PHASE_META[f.phase];
+              return (
+                <tr
+                  key={f.id}
+                  className="border-b border-zinc-900 last:border-0 hover:bg-zinc-900"
                 >
-                  {f.clientName}
-                  <div className="mt-2 flex gap-1">
-                    {can("update", "feedback") ? (
-                      <>
+                  <td
+                    className="p-3 font-medium text-zinc-100"
+                    style={{ borderLeftWidth: 3, borderLeftColor: pMeta.color }}
+                  >
+                    {f.clientName}
+                    <div className="mt-2 flex items-center gap-2">
+                      <span
+                        className="rounded-full px-2 py-0.5 font-medium"
+                        style={{ ...pillStyle(phaseMeta.color), fontSize: 10 }}
+                      >
+                        {phaseMeta.short}
+                      </span>
+                      <span className="whitespace-nowrap text-xs font-normal text-zinc-500">
+                        {formatDate(f.date)}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="p-3">
+                    <p className="font-medium text-zinc-200">{f.topic}</p>
+                    <p
+                      className="mt-1 max-w-md truncate text-xs text-zinc-500"
+                      title={f.details}
+                    >
+                      {f.details}
+                    </p>
+                  </td>
+                  <td className="p-3">
+                    <span
+                      className="flex items-center gap-1.5 text-zinc-300"
+                      style={{ fontSize: 12.5 }}
+                    >
+                      <span
+                        className="h-1.5 w-1.5 rounded-full"
+                        style={{ backgroundColor: FROM_TYPE_COLOR[f.fromType] }}
+                      />
+                      {f.from}
+                    </span>
+                  </td>
+                  <td className="p-3">
+                    <span
+                      className="rounded-full px-2 py-0.5 font-medium"
+                      style={{ ...pillStyle(pMeta.color), fontSize: 10 }}
+                    >
+                      {pMeta.label}
+                    </span>
+                  </td>
+                  <td
+                    className="truncate p-3"
+                    style={{ maxWidth: 220, fontSize: 12 }}
+                    title={f.action || undefined}
+                  >
+                    {f.action ? (
+                      <span className="text-zinc-500">{f.action}</span>
+                    ) : (
+                      <span
+                        className="font-medium"
+                        style={{ color: COLOR.rose }}
+                      >
+                        Belum ditindaklanjuti
+                      </span>
+                    )}
+                  </td>
+                  <td className="p-3 text-right">
+                    <div className="flex justify-end gap-1">
+                      {can("update", "feedback") ? (
+                        <>
+                          <button
+                            className="ops-button"
+                            onClick={() => openEditor("feedback", f)}
+                          >
+                            Detail / Edit
+                          </button>
+                          <button
+                            className="ops-button ops-danger"
+                            onClick={() => askDelete("feedback", f)}
+                          >
+                            Hapus
+                          </button>
+                        </>
+                      ) : can("update-action", "feedback") ? (
                         <button
                           className="ops-button"
-                          onClick={() => openEditor("feedback", f)}
+                          onClick={() => openFeedbackAction(f)}
                         >
-                          Detail / Edit
+                          Edit tindak lanjut
                         </button>
+                      ) : (
                         <button
-                          className="ops-button ops-danger"
-                          onClick={() => askDelete("feedback", f)}
+                          className="ops-button"
+                          onClick={() => openFeedbackDetails(f)}
                         >
-                          Hapus
+                          Lihat detail
                         </button>
-                      </>
-                    ) : can("update-action", "feedback") ? (
-                      <button
-                        className="ops-button"
-                        onClick={() => openFeedbackAction(f)}
-                      >
-                        Edit tindak lanjut
-                      </button>
-                    ) : (
-                      <button
-                        className="ops-button"
-                        onClick={() => openFeedbackDetails(f)}
-                      >
-                        Lihat detail
-                      </button>
-                    )}
-                  </div>
-                </td>
-                <td className="p-3">
-                  <span
-                    className="rounded-full px-2 py-0.5 font-medium"
-                    style={{ ...pillStyle(phaseMeta.color), fontSize: 10 }}
-                  >
-                    {phaseMeta.short}
-                  </span>
-                </td>
-                <td className="whitespace-nowrap p-3 text-zinc-500">
-                  {formatDate(f.date)}
-                </td>
-                <td className="p-3">
-                  <span
-                    className="flex items-center gap-1.5 text-zinc-300"
-                    style={{ fontSize: 12.5 }}
-                  >
-                    <span
-                      className="h-1.5 w-1.5 rounded-full"
-                      style={{ backgroundColor: FROM_TYPE_COLOR[f.fromType] }}
-                    />
-                    {f.from}
-                  </span>
-                </td>
-                <td className="p-3 text-zinc-200" style={{ fontSize: 12.5 }}>
-                  {f.topic}
-                </td>
-                <td
-                  className="truncate p-3 text-zinc-500"
-                  style={{ maxWidth: 240, fontSize: 12 }}
-                  title={f.details}
-                >
-                  {f.details}
-                </td>
-                <td className="p-3">
-                  <span
-                    className="rounded-full px-2 py-0.5 font-medium"
-                    style={{ ...pillStyle(pMeta.color), fontSize: 10 }}
-                  >
-                    {pMeta.label}
-                  </span>
-                </td>
-                <td
-                  className="truncate p-3"
-                  style={{ maxWidth: 220, fontSize: 12 }}
-                  title={f.action || undefined}
-                >
-                  {f.action ? (
-                    <span className="text-zinc-500">{f.action}</span>
-                  ) : (
-                    <span className="font-medium" style={{ color: COLOR.rose }}>
-                      Belum ditindaklanjuti
-                    </span>
-                  )}
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={6} className="p-8 text-center text-zinc-600">
+                  Tidak ada feedback yang cocok filter ini.
                 </td>
               </tr>
-            );
-          })}
-          {rows.length === 0 && (
-            <tr>
-              <td colSpan={8} className="p-8 text-center text-zinc-600">
-                Tidak ada feedback yang cocok filter ini.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <Pager
+        page={safePage}
+        pageCount={pageCount}
+        total={rows.length}
+        from={(safePage - 1) * pageSize + 1}
+        to={Math.min(safePage * pageSize, rows.length)}
+        onChange={setPage}
+      />
     </div>
   );
 }
@@ -3742,35 +4134,23 @@ function FeedbackLoop() {
 
   return (
     <section className="space-y-6">
-      <header>
-        <div
-          className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider"
-          style={{ color: ACCENT }}
-        >
-          <MessageSquare className="h-3.5 w-3.5" />
-          Feedback Loop
-        </div>
-        <h1
-          className="mt-1 text-2xl font-semibold text-zinc-50"
-          style={{ fontFamily: "'Space Grotesk', sans-serif" }}
-        >
-          Feedback & tindak lanjut per checkpoint
-        </h1>
-        <p className="mt-1 text-sm text-zinc-500">
-          Diminta di 3 checkpoint tiap project: 30% (strategi/worksheet
-          selesai), 50% (desain UI/UX selesai), 90% (staging, siap production).
-        </p>
-      </header>
-
-      {can("create", "feedback") && (
-        <button
-          className="ops-button ops-primary"
-          disabled={!CLIENTS.length}
-          onClick={() => openEditor("feedback")}
-        >
-          + Tambah feedback
-        </button>
-      )}
+      <PageHeader
+        icon={MessageSquare}
+        eyebrow="Feedback Loop"
+        title="Feedback dan tindak lanjut"
+        description="Kelola feedback client pada checkpoint 30%, 50%, dan 90%. Gunakan filter dan pencarian untuk fokus pada item yang masih perlu ditindaklanjuti."
+        actions={
+          can("create", "feedback") && (
+            <button
+              className="ops-button ops-primary"
+              disabled={!CLIENTS.length}
+              onClick={() => openEditor("feedback")}
+            >
+              + Tambah feedback
+            </button>
+          )
+        }
+      />
       <FeedbackBanner items={FEEDBACK} onSelectPriority={setPriorityFilter} />
 
       <div>
@@ -3810,32 +4190,35 @@ function TabButton({ active, onClick, icon: Icon, children }) {
   );
 }
 
-/* -------------------------- shared prototype store -------------------------- */
+/* ------------------------------- shared store ------------------------------- */
 const derive = (compute) => compute();
 const OpsContext = createContext(null);
-const STORAGE_KEY = "pbm-ops-v5";
-const SESSION_KEY = "pbm-ops-v5-session";
 const ROLE_IDS = Object.keys(PIC);
 const FULL_ACCESS_ROLES = new Set(["coo", "project-manager"]);
 const TAB_ACCESS = {
   coo: ["board", "hub", "kpi", "feedback", "clients", "users"],
-  "project-manager": ["board", "hub", "kpi", "feedback", "clients"],
+  "project-manager": ["board", "hub", "kpi", "feedback", "clients", "users"],
   developer: ["board", "feedback"],
   creative: ["board", "feedback"],
   "digital-marketer": ["board", "kpi", "feedback"],
+  cmo: ["board", "kpi", "feedback", "team"],
+  "marketing-manager": ["board", "feedback", "team"],
+  "content-specialist": ["board", "feedback", "team"],
+  "appointment-setter": ["board", "feedback", "team"],
 };
 const TAB_META = [
   { id: "board", label: "Execution Board", icon: LayoutGrid },
   { id: "hub", label: "Operations Hub", icon: LayoutDashboard },
-  { id: "kpi", label: "KPI Dashboard", icon: TrendingUp },
+  { id: "kpi", label: "Client Performance KPI", icon: TrendingUp },
+  { id: "team", label: "Team Performance KPI", icon: Users },
   { id: "feedback", label: "Feedback Loop", icon: MessageSquare },
   { id: "clients", label: "Clients", icon: Users },
   { id: "users", label: "Users & Roles", icon: Users },
 ];
 export function canRole(role, action, resource) {
   if (!PIC[role]) return false;
-  if (action === "view") return TAB_ACCESS[role]?.includes(resource) || false;
-  if (resource === "users") return role === "coo";
+  if (action === "view")
+    return resource === "team" || TAB_ACCESS[role]?.includes(resource) || false;
   if (FULL_ACCESS_ROLES.has(role)) return true;
   if (
     role === "digital-marketer" &&
@@ -3872,25 +4255,6 @@ const FIELDS = [
   ["intentRate", "Intent rate (%)"],
 ];
 
-export function createSeed() {
-  return clone({
-    version: 6,
-    clients: SEED_CLIENTS,
-    tasks: SEED_TASKS,
-    cycles: SEED_CYCLES.map((c) => ({
-      ...c,
-      ...aggregateVariants(c.variants),
-      primaryMetric: c.primaryMetric === "—" ? "Lead Rate" : c.primaryMetric,
-    })),
-    feedback: SEED_FEEDBACK,
-    users: ROLE_IDS.map((role) => ({
-      id: `user-${role}`,
-      email: `${role.replace("-", "")}@gmail.com`,
-      role,
-      active: true,
-    })),
-  });
-}
 export function aggregateVariants(variants) {
   const sum = (key) =>
     variants.every((v) => v[key] == null)
@@ -3981,6 +4345,20 @@ export function saveRecord(data, kind, input) {
       throw new Error("Priority atau tipe tidak valid.");
     numberCheck(record.cycle, "Cycle delivery", 999, true);
     numberCheck(record.revision, "Revisi", Infinity, true);
+    record.createdAt = existing?.createdAt || record.createdAt || todayISO();
+    if (record.status === "done") {
+      record.completedAt =
+        existing?.status === "done" && existing.completedAt
+          ? existing.completedAt
+          : record.completedAt || todayISO();
+      record.dueAtCompletion =
+        existing?.status === "done" && existing.dueAtCompletion
+          ? existing.dueAtCompletion
+          : record.dueAtCompletion || record.due;
+    } else {
+      record.completedAt = null;
+      record.dueAtCompletion = null;
+    }
   }
   if (kind === "cycles") {
     numberCheck(record.cycle, "Nomor cycle", 999, true);
@@ -4055,6 +4433,7 @@ export function saveRecord(data, kind, input) {
     delete record.clientName;
   }
   if (kind === "users") {
+    requireText(record.name, "Nama user");
     record.email = record.email.toLowerCase();
     if (!/^[a-z0-9][a-z0-9._%+\-]*@gmail\.com$/.test(record.email))
       throw new Error("Gunakan alamat login @gmail.com yang valid.");
@@ -4133,293 +4512,184 @@ export function deliveryClients(data) {
     };
   });
 }
-export function migrateData(input) {
-  const d = clone(input);
-  if (d.version === 5) {
-    d.version = 6;
-    d.tasks = d.tasks.map((task) => ({
-      ...task,
-      pic:
-        task.pic === "founder"
-          ? "coo"
-          : task.pic === "strategist"
-            ? "digital-marketer"
-            : task.pic,
-    }));
-    d.users = d.users.map((user) => {
-      const role =
-        user.role === "founder"
-          ? "coo"
-          : user.role === "strategist"
-            ? "digital-marketer"
-            : user.role;
-      return {
-        ...user,
-        id:
-          user.id === "user-founder"
-            ? "user-coo"
-            : user.id === "user-strategist"
-              ? "user-digital-marketer"
-              : user.id,
-        email:
-          user.email === "founder@gmail.com"
-            ? "coo@gmail.com"
-            : user.email === "strategist@gmail.com"
-              ? "digitalmarketer@gmail.com"
-              : user.email,
-        role,
-      };
-    });
-    d.feedback = d.feedback.map((item) => ({
-      ...item,
-      from:
-        item.from === "Founder"
-          ? "COO"
-          : item.from === "Strategist"
-            ? "Digital Marketer"
-            : item.from,
-    }));
-    d.clients = d.clients.map((client) => ({
-      ...client,
-      bottleneck: client.bottleneck
-        ?.replaceAll("Founder", "COO")
-        .replaceAll("Strategist", "Digital Marketer"),
-    }));
-    d.cycles = d.cycles.map((cycle) => {
-      if (cycle.id !== "gw-0" || cycle.cycle !== 0) return cycle;
-      return clone(SEED_CYCLES.find((seed) => seed.id === "gw-0"));
-    });
-  }
-  return d;
-}
-function loadData() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { data: createSeed(), error: "" };
-    const d = migrateData(JSON.parse(raw));
-    if (
-      d.version !== 6 ||
-      !["clients", "tasks", "cycles", "feedback", "users"].every((k) =>
-        Array.isArray(d[k]),
-      )
-    )
-      throw new Error();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(d));
-    return { data: d, error: "" };
-  } catch {
-    return {
-      data: createSeed(),
-      error:
-        "Penyimpanan browser tidak dapat dibaca. Menggunakan data demo; data lama belum ditimpa.",
-    };
-  }
-}
-function csrfRequestHeader() {
-  const cookie = document.cookie
-    .split("; ")
-    .find((entry) => entry.startsWith("XSRF-TOKEN="));
-  if (cookie) {
-    return {
-      "X-XSRF-TOKEN": decodeURIComponent(cookie.slice("XSRF-TOKEN=".length)),
-    };
-  }
-  return {
-    "X-CSRF-TOKEN":
-      document.querySelector('meta[name="csrf-token"]')?.content || "",
-  };
-}
-async function userRequest(url, method, payload) {
-  const response = await fetch(url, {
-    method,
-    credentials: "same-origin",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      ...csrfRequestHeader(),
-    },
-    body: payload ? JSON.stringify(payload) : undefined,
-  });
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const message = Object.values(result.errors || {}).flat()[0];
-    throw new Error(message || (response.status === 403 ? "Hanya COO yang dapat mengelola user." : "Perubahan user gagal disimpan."));
-  }
-  return result;
+function firstError(errors) {
+  const value = Object.values(errors || {})[0];
+  return Array.isArray(value) ? value[0] : value || "Perubahan gagal disimpan.";
 }
 
-function OpsProvider({ children, authUser, serverUsers = [], serverOperations }) {
-  const [loaded] = useState(loadData),
-    [data, setData] = useState(() => ({
-      ...loaded.data,
-      ...(authUser !== undefined && serverOperations ? serverOperations : {}),
-      users: authUser !== undefined ? serverUsers : loaded.data.users,
-    })),
-    [storageError, setStorageError] = useState(loaded.error);
-  const dataRef = useRef(data);
-  const [prototypeSession, setPrototypeSession] = useState(() => {
-    if (authUser !== undefined) return null;
-    try {
-      return sessionStorage.getItem(SESSION_KEY);
-    } catch {
-      return null;
-    }
+function inertiaMutation(url, method, payload = {}) {
+  return new Promise((resolve, reject) => {
+    router.visit(url, {
+      method,
+      data: payload,
+      preserveScroll: true,
+      preserveState: true,
+      onSuccess: () => resolve(),
+      onError: (errors) => reject(new Error(firstError(errors))),
+    });
   });
-  const [editor, setEditor] = useState(null),
-    [confirm, setConfirm] = useState(null),
-    [notice, setNotice] = useState("");
-  const currentUser =
-    authUser !== undefined
-      ? authUser
-        ? data.users.find(
-            (u) => u.email.toLowerCase() === authUser.email.toLowerCase(),
-          ) || { ...authUser, active: true }
-        : null
-      : data.users.find((u) => u.id === prototypeSession && u.active) || null;
+}
+
+function OpsProvider({
+  children,
+  authUser,
+  serverUsers = [],
+  serverOperations = {},
+  serverTeam,
+  flash = {},
+}) {
+  const incomingData = () => ({
+    version: 9,
+    clients: serverOperations.clients || [],
+    tasks: serverOperations.tasks || [],
+    cycles: serverOperations.cycles || [],
+    feedback: serverOperations.feedback || [],
+    users: serverUsers,
+    team:
+      serverTeam ||
+      createTeamSeed(serverUsers, serverOperations.clients || []),
+  });
+  const [data, setData] = useState(incomingData);
+  const dataRef = useRef(data);
+  const [editor, setEditor] = useState(null);
+  const [confirm, setConfirm] = useState(null);
+  const [notice, setNotice] = useState(flash.success || "");
+  const currentUser = authUser ? { ...authUser, active: true } : null;
   const can = (action, resource) =>
     currentUser ? canRole(currentUser.role, action, resource) : false;
-  function commit(next, message) {
+
+  useEffect(() => {
+    const next = incomingData();
     dataRef.current = next;
     setData(next);
-    if (authUser === undefined)
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-        setStorageError("");
-      } catch {
-        setStorageError(
-          "Perubahan hanya tersimpan sementara. Penyimpanan browser penuh atau tidak tersedia.",
-        );
-      }
-    setNotice(message);
-  }
+  }, [serverOperations, serverUsers, serverTeam]);
+
+  useEffect(() => {
+    setNotice(flash.success || "");
+  }, [flash.success]);
+
   function login(email, password, callbacks = {}) {
-    if (authUser === undefined) {
-      const user = dataRef.current.users.find(
-        (u) => u.email.toLowerCase() === email.trim().toLowerCase() && u.active,
-      );
-      if (!user) throw new Error("Email tidak terdaftar atau user tidak aktif.");
-      setPrototypeSession(user.id);
-      try {
-        sessionStorage.setItem(SESSION_KEY, user.id);
-      } catch {}
-      return;
-    }
-    router.post("/login", { email, password }, callbacks);
+    router.post(
+      "/login",
+      { email, password },
+      {
+        preserveScroll: true,
+        ...callbacks,
+      },
+    );
   }
+
   function logout() {
     setEditor(null);
     setConfirm(null);
-    if (authUser === undefined) {
-      setPrototypeSession(null);
-      try {
-        sessionStorage.removeItem(SESSION_KEY);
-      } catch {}
-      return;
-    }
     router.post("/logout");
   }
+
   function openEditor(kind, record = null, preset = {}) {
     const action = record ? "update" : "create";
     if (!can(action, kind)) accessDenied();
     setEditor({ kind, record, preset });
   }
+
   function openFeedbackAction(record) {
     if (!can("update-action", "feedback")) accessDenied();
     setEditor({ kind: "feedback-action", record, preset: {} });
   }
+
   function openFeedbackDetails(record) {
     if (!can("view", "feedback")) accessDenied();
     setEditor({ kind: "feedback-read", record, preset: {} });
   }
+
   async function save(kind, record) {
-    const action = dataRef.current[kind]?.some((item) => item.id === record.id)
-      ? "update"
-      : "create";
+    const existing = dataRef.current[kind]?.some(
+      (item) => String(item.id) === String(record.id),
+    );
+    const action = existing ? "update" : "create";
     if (!can(action, kind)) accessDenied();
-    if (kind === "users" && authUser !== undefined) {
-      const validated = saveRecord(dataRef.current, kind, record).users.find(
-        (user) => user.id === record.id || (!record.id && user.email === record.email.trim().toLowerCase()),
-      );
-      const existing = dataRef.current.users.some((user) => user.id === record.id);
-      const result = await userRequest(
-        existing ? `/users/${record.id}` : "/users",
-        existing ? "PUT" : "POST",
-        { email: validated.email, password: record.password || null, role: validated.role, active: validated.active },
-      );
-      commit({
-        ...dataRef.current,
-        users: existing
-          ? dataRef.current.users.map((user) => user.id === result.user.id ? result.user : user)
-          : [...dataRef.current.users, result.user],
-      }, "User berhasil disimpan ke database.");
-    } else if (authUser !== undefined) {
-      const next = saveRecord(dataRef.current, kind, record);
-      const existing = dataRef.current[kind].some((item) => item.id === record.id);
-      const validated = existing
-        ? next[kind].find((item) => item.id === record.id)
-        : next[kind].at(-1);
-      const result = await userRequest(
-        existing ? `/${kind}/${record.id}` : `/${kind}`,
-        existing ? "PUT" : "POST",
-        validated,
-      );
-      commit({
-        ...dataRef.current,
-        [kind]: existing
-          ? dataRef.current[kind].map((item) => item.id === record.id ? result.record : item)
-          : [...dataRef.current[kind], result.record],
-      }, `${KIND_LABEL[kind]} berhasil disimpan ke database.`);
-    } else {
-      commit(
-        saveRecord(dataRef.current, kind, record),
-        `${KIND_LABEL[kind]} berhasil disimpan.`,
-      );
-    }
+
+    const next = saveRecord(dataRef.current, kind, record);
+    const validated = existing
+      ? next[kind].find((item) => String(item.id) === String(record.id))
+      : next[kind].at(-1);
+    const url = existing ? `/${kind}/${record.id}` : `/${kind}`;
+    const method = existing ? "put" : "post";
+    const payload =
+      kind === "users"
+        ? {
+            name: record.name,
+            email: validated.email,
+            password: record.password || "",
+            role: validated.role,
+            active: validated.active,
+          }
+        : validated;
+
+    await inertiaMutation(url, method, payload);
+    setNotice(`${KIND_LABEL[kind]} berhasil disimpan.`);
     setEditor(null);
   }
+
   async function saveFeedbackAction(id, action) {
     if (!can("update-action", "feedback")) accessDenied();
-    const current = dataRef.current.feedback.find((item) => item.id === id);
-    if (!current) throw new Error("Feedback tidak tersedia.");
-    if (authUser !== undefined) {
-      const result = await userRequest(`/feedback/${id}/action`, "PATCH", { action });
-      commit({ ...dataRef.current, feedback: dataRef.current.feedback.map((item) => item.id === id ? result.record : item) }, "Tindak lanjut feedback berhasil diperbarui di database.");
-    } else {
-      commit(
-        saveRecord(dataRef.current, "feedback", { ...current, action }),
-        "Tindak lanjut feedback berhasil diperbarui.",
-      );
-    }
+    if (!dataRef.current.feedback.some((item) => item.id === id))
+      throw new Error("Feedback tidak tersedia.");
+    await inertiaMutation(`/feedback/${id}/action`, "patch", { action });
+    setNotice("Tindak lanjut feedback berhasil diperbarui.");
     setEditor(null);
   }
+
   async function remove(kind, id) {
     if (!can("delete", kind)) accessDenied();
-    if (kind === "users" && authUser !== undefined) {
-      await userRequest(`/users/${id}`, "DELETE");
-      commit({ ...dataRef.current, users: dataRef.current.users.filter((user) => user.id !== id) }, "User berhasil dihapus dari database.");
-    } else if (authUser !== undefined) {
-      await userRequest(`/${kind}/${id}`, "DELETE");
-      commit(deleteRecord(dataRef.current, kind, id), `${KIND_LABEL[kind]} berhasil dihapus dari database.`);
-    } else {
-      commit(
-        deleteRecord(dataRef.current, kind, id),
-        `${KIND_LABEL[kind]} berhasil dihapus.`,
-      );
-    }
+    await inertiaMutation(`/${kind}/${id}`, "delete");
+    setNotice(`${KIND_LABEL[kind]} berhasil dihapus.`);
     setConfirm(null);
   }
+
   async function moveTask(id, status) {
     if (!can("update", "tasks")) accessDenied();
-    if (authUser !== undefined) {
-      const task = dataRef.current.tasks.find((item) => item.id === id);
-      if (!task) throw new Error("Task tidak tersedia.");
-      await save("tasks", { ...task, status });
-    } else {
-      commit(
-        moveTaskRecord(dataRef.current, id, status),
-        "Status task diperbarui; Operations Hub dan kalender ikut berubah.",
-      );
-    }
+    const task = dataRef.current.tasks.find(
+      (item) => String(item.id) === String(id),
+    );
+    if (!task) throw new Error("Task tidak tersedia.");
+    await inertiaMutation(`/tasks/${id}/status`, "patch", { status });
+    setNotice(
+      "Status task diperbarui; Operations Hub dan kalender ikut berubah.",
+    );
   }
+
+  async function teamDispatch(command) {
+    if (command.type === "save") {
+      await inertiaMutation("/team-reports", "post", command.report);
+      setNotice("Team Performance KPI diperbarui.");
+      return;
+    }
+    if (command.type === "save-definition") {
+      const definition = command.definition;
+      const exists = dataRef.current.team.definitions.some(
+        (item) => item.id === definition.id,
+      );
+      await inertiaMutation(
+        exists
+          ? `/team-kpi-definitions/${definition.id}`
+          : "/team-kpi-definitions",
+        exists ? "put" : "post",
+        definition,
+      );
+      setNotice("Pengaturan KPI diperbarui.");
+      return;
+    }
+    if (command.type === "toggle-definition") {
+      await inertiaMutation(
+        `/team-kpi-definitions/${command.definitionId}/toggle`,
+        "patch",
+      );
+      setNotice("Status KPI diperbarui.");
+      return;
+    }
+    throw new Error("Tindakan Team Performance tidak tersedia.");
+  }
+
   useEffect(() => {
     const context =
       typeof document === "undefined" ? undefined : document.modelContext;
@@ -4437,11 +4707,7 @@ function OpsProvider({ children, authUser, serverUsers = [], serverOperations })
       title: "Read current role permissions",
       description:
         "Read the signed-in PBM Ops role, visible tabs, and allowed data changes.",
-      inputSchema: {
-        type: "object",
-        properties: {},
-        additionalProperties: false,
-      },
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: true, untrustedContentHint: false },
       execute() {
         return {
@@ -4459,47 +4725,22 @@ function OpsProvider({ children, authUser, serverUsers = [], serverOperations })
         };
       },
     });
-    if (can("update-action", "feedback"))
-      register({
-        name: "update_feedback_action",
-        title: "Update feedback action",
-        description:
-          "Update only the action or follow-up field on an existing PBM Ops feedback record.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            feedbackId: { type: "string" },
-            action: { type: "string" },
-          },
-          required: ["feedbackId", "action"],
-          additionalProperties: false,
-        },
-        annotations: { readOnlyHint: false, untrustedContentHint: false },
-        execute(input) {
-          if (
-            !input ||
-            typeof input.feedbackId !== "string" ||
-            typeof input.action !== "string"
-          )
-            throw new Error("feedbackId dan action wajib berupa teks.");
-          saveFeedbackAction(input.feedbackId, input.action);
-          return { feedbackId: input.feedbackId, updated: true };
-        },
-      });
     return () => lifecycle.abort();
-  }, [currentUser?.id, currentUser?.role, data.feedback]);
+  }, [currentUser?.id, currentUser?.role]);
+
   const clients = deliveryClients(data);
   const value = {
+    teamDispatch,
     data,
     CLIENTS: clients,
     TASKS: data.tasks,
     CYCLES: data.cycles,
     FEEDBACK: data.feedback,
     CLIENT_COLOR: Object.fromEntries(
-      clients.map((c, i) => [
-        c.id,
-        CLIENT_COLOR[c.id] ||
-          Object.values(COLOR)[i % Object.values(COLOR).length],
+      clients.map((client, index) => [
+        client.id,
+        CLIENT_COLOR[client.id] ||
+          Object.values(COLOR)[index % Object.values(COLOR).length],
       ]),
     ),
     getClient: (id) =>
@@ -4510,7 +4751,7 @@ function OpsProvider({ children, authUser, serverUsers = [], serverOperations })
     can,
     login,
     logout,
-    storageError,
+    storageError: "",
     notice,
     editor,
     setEditor,
@@ -4591,7 +4832,6 @@ function InputField({
   min,
   max,
   step,
-  minLength,
 }) {
   return (
     <label>
@@ -4631,7 +4871,6 @@ function InputField({
           min={min}
           max={max}
           step={step}
-          minLength={minLength}
         />
       )}
     </label>
@@ -4668,6 +4907,9 @@ function defaultRecord(kind, data, preset = {}) {
       type: "feature",
       brief: "",
       blocked: false,
+      createdAt: todayISO(),
+      completedAt: null,
+      dueAtCompletion: null,
     },
     cycles: {
       client,
@@ -4697,7 +4939,13 @@ function defaultRecord(kind, data, preset = {}) {
       priority: 2,
       action: "",
     },
-    users: { email: "", password: "", role: "developer", active: true },
+    users: {
+      name: "",
+      email: "",
+      password: "",
+      role: "developer",
+      active: true,
+    },
   };
   return { ...defaults[kind], ...preset };
 }
@@ -4705,7 +4953,6 @@ function FeedbackActionEditor({ record, onClose }) {
   const { saveFeedbackAction, getClient } = useOps();
   const [action, setAction] = useState(record.action || "");
   const [error, setError] = useState("");
-  const [processing, setProcessing] = useState(false);
   return (
     <Modal title="Perbarui tindak lanjut" onClose={onClose}>
       <div className="mb-5 rounded-xl border border-zinc-800 bg-zinc-900 p-4">
@@ -4721,13 +4968,9 @@ function FeedbackActionEditor({ record, onClose }) {
         onSubmit={async (event) => {
           event.preventDefault();
           try {
-            setError("");
-            setProcessing(true);
             await saveFeedbackAction(record.id, action);
           } catch (e) {
             setError(e.message);
-          } finally {
-            setProcessing(false);
           }
         }}
       >
@@ -4750,8 +4993,8 @@ function FeedbackActionEditor({ record, onClose }) {
           <button type="button" className="ops-button" onClick={onClose}>
             Batal
           </button>
-          <button type="submit" className="ops-button ops-primary" disabled={processing}>
-            {processing ? "Menyimpan..." : "Simpan tindak lanjut"}
+          <button type="submit" className="ops-button ops-primary">
+            Simpan tindak lanjut
           </button>
         </footer>
       </form>
@@ -4798,8 +5041,7 @@ function RecordEditor({ kind, record, preset, onClose }) {
   const [draft, setDraft] = useState(() =>
       clone(record || defaultRecord(kind, data, preset)),
     ),
-    [error, setError] = useState(""),
-    [processing, setProcessing] = useState(false);
+    [error, setError] = useState("");
   const set = (key, value) => setDraft((d) => ({ ...d, [key]: value }));
   const field = (key, label, type = "text", extra = {}) => (
     <InputField
@@ -4819,17 +5061,9 @@ function RecordEditor({ kind, record, preset, onClose }) {
   async function submit(e) {
     e.preventDefault();
     try {
-      setError("");
-      if (kind === "users" && !record && draft.password.length < 8)
-        throw new Error("Password minimal 8 karakter.");
-      if (kind === "users" && record && draft.password && draft.password.length < 8)
-        throw new Error("Password baru minimal 8 karakter.");
-      setProcessing(true);
       await save(kind, draft);
     } catch (e) {
       setError(e.message);
-    } finally {
-      setProcessing(false);
     }
   }
   return (
@@ -4854,12 +5088,18 @@ function RecordEditor({ kind, record, preset, onClose }) {
           )}
           {kind === "users" && (
             <>
+              {field("name", "Nama user", "text", { required: true })}
               {field("email", "Email login (@gmail.com)", "email", {
                 required: true,
               })}
-              {field("password", record ? "Password baru (opsional)" : "Password", "password", {
-                required: !record,
-              })}
+              {field(
+                "password",
+                record
+                  ? "Password baru (kosongkan jika tidak berubah)"
+                  : "Password awal",
+                "password",
+                { required: !record },
+              )}
               {field("role", "Role", "text", { options: optionsFrom(PIC) })}
               <label className="ops-inline-label">
                 <input
@@ -4872,7 +5112,7 @@ function RecordEditor({ kind, record, preset, onClose }) {
               <p className="text-sm text-zinc-400 sm:col-span-2">
                 Nama akun boleh berada di alamat Gmail. Semua halaman
                 operasional menampilkan role. Permission langsung mengikuti role
-                yang dipilih. Password minimal 8 karakter.
+                yang dipilih.
               </p>
             </>
           )}
@@ -5138,8 +5378,8 @@ function RecordEditor({ kind, record, preset, onClose }) {
           <button type="button" className="ops-button" onClick={onClose}>
             Batal
           </button>
-          <button type="submit" className="ops-button ops-primary" disabled={processing}>
-            {processing ? "Menyimpan..." : `Simpan ${KIND_LABEL[kind]}`}
+          <button type="submit" className="ops-button ops-primary">
+            Simpan {KIND_LABEL[kind]}
           </button>
         </footer>
       </form>
@@ -5167,7 +5407,7 @@ function DeleteDialog({ kind, record, onClose }) {
         </p>
       ) : (
         <p className="mt-3 text-sm text-zinc-400">
-          Data ini akan dihapus permanen.
+          Data ini akan dihapus dari database.
           {kind === "cycles"
             ? " Task delivery tetap ada; metrik dan varian cycle ini akan hilang dari KPI serta Cycle Log."
             : ""}
@@ -5187,7 +5427,6 @@ function DeleteDialog({ kind, record, onClose }) {
           className="ops-button ops-danger"
           onClick={async () => {
             try {
-              setError("");
               await remove(kind, record.id);
             } catch (e) {
               setError(e.message);
@@ -5382,8 +5621,8 @@ function UserManager() {
         </table>
       </div>
       <p className="mt-4 text-sm text-zinc-400">
-        Data akun tersimpan di database. Minimal satu COO harus tetap aktif;
-        akun yang sedang digunakan tidak dapat dihapus.
+        Minimal satu COO aktif. Setiap akun memakai email dan password Laravel;
+        akses halaman dan tindakan mengikuti role yang dipilih.
       </p>
       <div className="mt-6 overflow-x-auto rounded-xl border border-zinc-800">
         <table className="w-full min-w-[760px] text-left text-sm">
@@ -5425,9 +5664,9 @@ function UserManager() {
 function Login() {
   const { login, data } = useOps(),
     [email, setEmail] = useState("coo@gmail.com"),
-    [password, setPassword] = useState("password"),
-    [error, setError] = useState(""),
-    [processing, setProcessing] = useState(false);
+    [password, setPassword] = useState(""),
+    [processing, setProcessing] = useState(false),
+    [error, setError] = useState("");
   return (
     <main className="flex min-h-screen items-center justify-center bg-zinc-950 p-6 text-zinc-100">
       <section className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900 p-8">
@@ -5436,7 +5675,8 @@ function Login() {
         </span>
         <h1 className="mt-6 text-3xl font-semibold">Masuk ke PBM Ops</h1>
         <p className="mt-3 text-sm leading-6 text-zinc-400">
-          Masuk menggunakan akun yang terdaftar di PBM Ops.
+          Sistem operasional agency. Masuk menggunakan akun Gmail yang sudah
+          terdaftar.
         </p>
         <form
           className="mt-6 space-y-4"
@@ -5444,11 +5684,10 @@ function Login() {
             e.preventDefault();
             setError("");
             login(email, password, {
-              preserveScroll: true,
               onStart: () => setProcessing(true),
-              onError: (errors) =>
-                setError(errors.email || errors.password || "Login gagal."),
               onFinish: () => setProcessing(false),
+              onError: (errors) =>
+                setError(firstError(errors) || "Login gagal."),
             });
           }}
         >
@@ -5484,7 +5723,7 @@ function Login() {
             type="submit"
             disabled={processing}
           >
-            {processing ? "Memproses..." : "Masuk"}
+            {processing ? "Memproses…" : "Masuk"}
           </button>
         </form>
         <div className="mt-6 border-t border-zinc-800 pt-5">
@@ -5501,7 +5740,6 @@ function Login() {
                   onClick={() => {
                     setEmail(u.email);
                     setPassword("password");
-                    setError("");
                   }}
                   title={u.email}
                 >
@@ -5511,8 +5749,7 @@ function Login() {
           </div>
         </div>
         <p className="mt-5 text-xs leading-5 text-zinc-500">
-          Akun demo menggunakan password &quot;password&quot;. Belum terhubung ke
-          Google.
+          Gunakan akses cepat di atas untuk meninjau workspace berdasarkan role.
         </p>
       </section>
     </main>
@@ -5522,8 +5759,10 @@ function Login() {
 /* -------------------------- app shell -------------------------- */
 
 function AppShell() {
-  const { currentUser, logout, storageError, notice, can } = useOps();
+  const { currentUser, logout, storageError, notice, can, data, teamDispatch } =
+    useOps();
   const [tab, setTab] = useState("board");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [highlightClient, setHighlightClient] = useState(null);
 
   useEffect(() => {
@@ -5536,6 +5775,16 @@ function AppShell() {
     setTab("board");
     setHighlightClient(clientId);
   }
+
+  function selectTab(nextTab) {
+    setTab(nextTab);
+    setMobileNavOpen(false);
+  }
+
+  const visibleTabs = TAB_META.filter((item) => can("view", item.id));
+  const activeTab =
+    visibleTabs.find((item) => item.id === tab) || visibleTabs[0];
+  const ActiveTabIcon = activeTab.icon;
 
   return (
     <div
@@ -5555,7 +5804,7 @@ function AppShell() {
       />
 
       <header className="relative border-b border-zinc-900">
-        <div className="mx-auto flex max-w-[1400px] flex-wrap items-center justify-between gap-3 px-6 py-4">
+        <div className="mx-auto hidden max-w-[1400px] items-center justify-between gap-3 px-6 py-4 xl:flex">
           <div className="flex items-center gap-2.5">
             <span
               className="flex h-7 w-7 items-center justify-center rounded-lg text-xs font-bold text-white"
@@ -5572,11 +5821,11 @@ function AppShell() {
           </div>
 
           <nav className="flex flex-wrap items-center gap-1 rounded-full border border-zinc-800 bg-zinc-900 p-1">
-            {TAB_META.filter((item) => can("view", item.id)).map((item) => (
+            {visibleTabs.map((item) => (
               <TabButton
                 key={item.id}
                 active={tab === item.id}
-                onClick={() => setTab(item.id)}
+                onClick={() => selectTab(item.id)}
                 icon={item.icon}
               >
                 {item.label}
@@ -5599,16 +5848,118 @@ function AppShell() {
             </button>
           </div>
         </div>
+
+        <div className="mx-auto max-w-[1400px] px-4 py-3 xl:hidden">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex shrink-0 items-center gap-2.5">
+              <span
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-xs font-bold text-white"
+                style={{
+                  backgroundColor: ACCENT,
+                  fontFamily: "'Space Grotesk', sans-serif",
+                }}
+              >
+                P
+              </span>
+              <span className="text-sm font-semibold tracking-tight text-zinc-100">
+                PBM Ops
+              </span>
+            </div>
+
+            <div className="flex min-w-0 items-center gap-2">
+              <div
+                className="flex min-w-0 items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1.5"
+                aria-label={`Role aktif: ${PIC[currentUser.role].name}`}
+              >
+                <span
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-zinc-300"
+                  style={{ fontSize: 10, fontWeight: 600 }}
+                >
+                  {PIC[currentUser.role].initials}
+                </span>
+                <span className="truncate text-xs text-zinc-300">
+                  {PIC[currentUser.role].name}
+                </span>
+              </div>
+              <button
+                className="ops-button shrink-0 px-2.5"
+                onClick={logout}
+                aria-label="Keluar dari PBM Ops"
+              >
+                <LogOut className="h-4 w-4" />
+                <span className="hidden sm:inline">Keluar</span>
+              </button>
+            </div>
+          </div>
+
+          <nav className="relative mt-3" aria-label="Breadcrumb navigation">
+            <ol className="flex min-w-0 items-center gap-2 text-sm">
+              <li className="shrink-0 text-zinc-500">Workspace</li>
+              <li aria-hidden="true">
+                <ChevronRight className="h-4 w-4 text-zinc-700" />
+              </li>
+              <li className="min-w-0 flex-1">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2.5 text-left text-zinc-100"
+                  aria-expanded={mobileNavOpen}
+                  aria-controls="mobile-navigation-menu"
+                  onClick={() => setMobileNavOpen((open) => !open)}
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    <ActiveTabIcon className="h-4 w-4 shrink-0" />
+                    <span className="truncate font-medium">
+                      {activeTab.label}
+                    </span>
+                  </span>
+                  <ChevronDown
+                    className={`h-4 w-4 shrink-0 text-zinc-500 transition-transform ${mobileNavOpen ? "rotate-180" : ""}`}
+                  />
+                </button>
+              </li>
+            </ol>
+
+            {mobileNavOpen && (
+              <div
+                id="mobile-navigation-menu"
+                className="absolute inset-x-0 top-full z-40 mt-2 rounded-xl border border-zinc-800 bg-zinc-950 p-2 shadow-2xl shadow-black/50"
+              >
+                <p className="px-3 pb-2 pt-1 text-xs font-medium uppercase tracking-wider text-zinc-600">
+                  Pilih halaman
+                </p>
+                <div className="grid gap-1 sm:grid-cols-2">
+                  {visibleTabs.map((item) => {
+                    const Icon = item.icon;
+                    const active = item.id === tab;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm transition-colors ${
+                          active
+                            ? "bg-violet-600 text-white"
+                            : "text-zinc-300 hover:bg-zinc-900"
+                        }`}
+                        onClick={() => selectTab(item.id)}
+                      >
+                        <Icon className="h-4 w-4" />
+                        {item.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </nav>
+        </div>
       </header>
 
       <main className="relative mx-auto max-w-[1400px] px-6 py-8">
-        <div className="mb-5 flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-400">
-          <span>
-            PROTOTIPE · {PIC[currentUser.role].name} · Permission aktif · Data
-            tersimpan di browser ini
-          </span>
-          <span role="status">{storageError || notice}</span>
-        </div>
+        {(storageError || notice) && (
+          <div className="mb-5 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-300">
+            <span role="status">{storageError || notice}</span>
+          </div>
+        )}
         {tab === "board" && (
           <ExecutionBoard
             highlightClient={highlightClient}
@@ -5619,6 +5970,14 @@ function AppShell() {
           <ExecutiveHub onGoToClient={goToClient} />
         )}
         {tab === "kpi" && can("view", "kpi") && <KpiDashboard />}
+        {tab === "team" && (
+          <TeamPerformance
+            team={data.team}
+            users={data.users}
+            currentUser={currentUser}
+            dispatch={teamDispatch}
+          />
+        )}
         {tab === "feedback" && can("view", "feedback") && <FeedbackLoop />}
         {tab === "clients" && can("view", "clients") && <ClientManager />}
         {tab === "users" && can("view", "users") && <UserManager />}
@@ -5630,9 +5989,21 @@ function AppShell() {
 
 const PROTOTYPE_CSS =
   ".pbm-prototype { color-scheme: dark; font-family: Inter, system-ui, sans-serif; background: #09090b; }\nbutton,select { cursor:pointer; }\nbutton:disabled { cursor:not-allowed; opacity:.45; }\ninput,select,textarea { color-scheme:dark; }\nbutton:focus-visible,a:focus-visible { outline:2px solid #a78bfa; outline-offset:3px; }\n.ops-dialog::backdrop { background:rgb(0 0 0 / .76); backdrop-filter:blur(4px); }\n.ops-dialog { margin:auto; max-height:90dvh; width:min(850px,calc(100% - 24px)); overflow:auto; border:1px solid #3f3f46; border-radius:20px; padding:24px; background:#09090b; color:#f4f4f5; }\n.ops-dialog input:not([type=radio]):not([type=checkbox]),.ops-dialog select,.ops-dialog textarea,.login-input { width:100%; background:#18181b; border:1px solid #3f3f46; border-radius:8px; padding:10px 12px; color:#f4f4f5; }\n.ops-dialog label { display:grid; gap:7px; font-size:14px; color:#d4d4d8; }\n.ops-dialog textarea { min-height:88px; resize:vertical; }\n.ops-button { display:inline-flex; align-items:center; justify-content:center; gap:6px; border:1px solid #3f3f46; border-radius:8px; padding:8px 12px; font-size:14px; background:#18181b; color:#e4e4e7; }\n.ops-button:hover { background:#27272a; }\n.ops-primary { background:#4f39f6; border-color:#4f39f6; color:white; }\n.ops-primary:hover { background:#634efb; }\n.ops-danger { color:#fda4af; border-color:#9f1239; }\n.ops-empty { padding:32px; border:1px dashed #3f3f46; border-radius:12px; color:#a1a1aa; text-align:center; }\n@media(max-width:640px) { main { padding:20px 12px !important; } .ops-dialog { padding:18px; } }\n.ops-dialog label.ops-inline-label { display:flex; align-items:center; gap:8px; }\n";
-export default function App({ authUser, serverUsers, serverOperations }) {
+export default function App({
+  authUser,
+  serverUsers,
+  serverOperations,
+  serverTeam,
+  flash,
+}) {
   return (
-    <OpsProvider authUser={authUser} serverUsers={serverUsers} serverOperations={serverOperations}>
+    <OpsProvider
+      authUser={authUser}
+      serverUsers={serverUsers}
+      serverOperations={serverOperations}
+      serverTeam={serverTeam}
+      flash={flash}
+    >
       <style>{PROTOTYPE_CSS}</style>
       <AppShell />
     </OpsProvider>

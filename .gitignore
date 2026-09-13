@@ -5,6 +5,7 @@ dist/
 *.zip
 *.tar.gz
 .env*
+!.env.example
 tests/.compiled.mjs
 upgrade.py
 enhancements.txt

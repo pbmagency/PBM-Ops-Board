@@ -1,6 +1,5 @@
 @import "tailwindcss";
-@source "../js/**/*.jsx";
-@source "../../src/**/*.jsx";
+@source "../js/**/*.{js,jsx,ts,tsx}";
 
 :root {
   color-scheme: dark;

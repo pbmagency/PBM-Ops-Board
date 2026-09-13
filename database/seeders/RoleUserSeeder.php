@@ -17,6 +17,10 @@ class RoleUserSeeder extends Seeder
             ['name' => 'Developer', 'email' => 'developer@gmail.com', 'role' => UserRole::Developer],
             ['name' => 'Creative', 'email' => 'creative@gmail.com', 'role' => UserRole::Creative],
             ['name' => 'Digital Marketer', 'email' => 'digitalmarketer@gmail.com', 'role' => UserRole::DigitalMarketer],
+            ['name' => 'CMO', 'email' => 'cmo@gmail.com', 'role' => UserRole::CMO],
+            ['name' => 'Marketing Manager', 'email' => 'marketingmanager@gmail.com', 'role' => UserRole::MarketingManager],
+            ['name' => 'Content Specialist', 'email' => 'contentspecialist@gmail.com', 'role' => UserRole::ContentSpecialist],
+            ['name' => 'Appointment Setter', 'email' => 'appointmentsetter@gmail.com', 'role' => UserRole::AppointmentSetter],
         ];
 
         foreach ($users as $user) {

@@ -17,7 +17,7 @@ class RoleUserSeederTest extends TestCase
     {
         $this->seed(RoleUserSeeder::class);
 
-        $this->assertDatabaseCount('users', 5);
+        $this->assertDatabaseCount('users', 9);
         $this->assertEqualsCanonicalizing(
             UserRole::cases(),
             User::query()->pluck('role')->all(),
@@ -35,6 +35,6 @@ class RoleUserSeederTest extends TestCase
         $this->seed(RoleUserSeeder::class);
         $this->seed(RoleUserSeeder::class);
 
-        $this->assertDatabaseCount('users', 5);
+        $this->assertDatabaseCount('users', 9);
     }
 }

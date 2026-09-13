@@ -38,4 +38,15 @@ class AuthenticationTest extends TestCase
 
         $this->assertGuest();
     }
+
+    public function test_logged_in_user_is_logged_out_after_account_is_deactivated(): void
+    {
+        $this->seed(RoleUserSeeder::class);
+        $user = User::where('email', 'developer@gmail.com')->firstOrFail();
+        $this->actingAs($user);
+        $user->update(['active' => false]);
+
+        $this->get('/')->assertRedirect('/')->assertSessionHasErrors('email');
+        $this->assertGuest();
+    }
 }

@@ -17,6 +17,10 @@ class User extends Authenticatable
         'developer@gmail.com',
         'creative@gmail.com',
         'digitalmarketer@gmail.com',
+        'cmo@gmail.com',
+        'marketingmanager@gmail.com',
+        'contentspecialist@gmail.com',
+        'appointmentsetter@gmail.com',
     ];
 
     protected $fillable = [
@@ -40,5 +44,10 @@ class User extends Authenticatable
             'role' => UserRole::class,
             'active' => 'boolean',
         ];
+    }
+
+    public function teamReports(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(TeamReport::class);
     }
 }

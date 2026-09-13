@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5175 --strictPort",
     "build": "vite build",
-    "test": "node --test tests/*.test.mjs"
+    "test": "npm run types:check",
+    "types:check": "tsc --noEmit"
   },
   "dependencies": {
     "@inertiajs/react": "^2.2.15",
@@ -21,6 +22,9 @@
     "laravel-vite-plugin": "^1.2.0",
     "react-test-renderer": "^19.2.0",
     "tailwindcss": "^4.1.11",
+    "typescript": "^5.9.2",
+    "@types/react": "^19.1.10",
+    "@types/react-dom": "^19.1.7",
     "vite": "^6.1.0"
   }
 }

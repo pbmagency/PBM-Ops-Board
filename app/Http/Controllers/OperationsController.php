@@ -3,205 +3,268 @@
 namespace App\Http\Controllers;
 
 use App\Enums\UserRole;
+use App\Http\Requests\ClientRequest;
+use App\Http\Requests\CycleRequest;
+use App\Http\Requests\FeedbackRequest;
+use App\Http\Requests\TaskRequest;
 use App\Models\Client;
 use App\Models\Cycle;
 use App\Models\Feedback;
 use App\Models\Task;
-use Illuminate\Http\JsonResponse;
+use App\Models\User;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
-use Illuminate\Validation\ValidationException;
 
 class OperationsController
 {
-    private const STATUSES = ['intake', 'strategy', 'design', 'frontend', 'staging', 'qa', 'review', 'done'];
-    private const ROLES = ['coo', 'developer', 'creative', 'digital-marketer', 'project-manager'];
-    private const CYCLE_STATUSES = ['Baseline', 'Improving', 'Declining', 'Setup'];
-
-    public function index(Request $request): JsonResponse
+    public function storeClient(ClientRequest $request): RedirectResponse
     {
-        abort_unless($request->user(), 401);
+        Gate::authorize('manage-operations');
+        Client::create(['id' => (string) Str::uuid(), ...$request->validated()]);
 
-        return response()->json(['operations' => $this->allData()]);
+        return back()->with('success', 'Client berhasil ditambahkan.');
     }
 
-    public function storeClient(Request $request): JsonResponse
+    public function updateClient(ClientRequest $request, Client $client): RedirectResponse
     {
-        $this->ensureManager($request);
-        $data = $this->clientData($request);
-        $client = Client::create(['id' => (string) Str::uuid(), ...$data]);
-        return response()->json(['record' => $this->client($client)], 201);
+        Gate::authorize('manage-operations');
+        $client->update($request->validated());
+
+        return back()->with('success', 'Client berhasil diperbarui.');
     }
 
-    public function updateClient(Request $request, Client $client): JsonResponse
+    public function destroyClient(Client $client): RedirectResponse
     {
-        $this->ensureManager($request);
-        $client->update($this->clientData($request, $client));
-        return response()->json(['record' => $this->client($client->fresh())]);
-    }
-
-    public function destroyClient(Request $request, Client $client): JsonResponse
-    {
-        $this->ensureManager($request);
+        Gate::authorize('manage-operations');
         $client->delete();
-        return response()->json(['deleted' => true]);
+
+        return back()->with('success', 'Client dan data terkait berhasil dihapus.');
     }
 
-    public function storeTask(Request $request): JsonResponse
+    public function storeTask(TaskRequest $request): RedirectResponse
     {
-        $this->ensureManager($request);
-        $task = Task::create(['id' => (string) Str::uuid(), ...$this->taskData($request)]);
-        return response()->json(['record' => $this->task($task)], 201);
+        Gate::authorize('manage-operations');
+        DB::transaction(function () use ($request) {
+            $task = Task::create(['id' => (string) Str::uuid(), ...$this->taskData($request->validated())]);
+            $this->recordStatus($task, null, $task->status, $request->user());
+        });
+
+        return back()->with('success', 'Task berhasil ditambahkan.');
     }
 
-    public function updateTask(Request $request, Task $task): JsonResponse
+    public function updateTask(TaskRequest $request, Task $task): RedirectResponse
     {
-        $this->ensureManager($request);
-        $task->update($this->taskData($request));
-        return response()->json(['record' => $this->task($task->fresh())]);
+        Gate::authorize('manage-operations');
+        DB::transaction(function () use ($request, $task) {
+            $before = $task->status;
+            $task->update($this->taskData($request->validated(), $task));
+            if ($before !== $task->status) {
+                $this->recordStatus($task, $before, $task->status, $request->user());
+            }
+        });
+
+        return back()->with('success', 'Task berhasil diperbarui.');
     }
 
-    public function destroyTask(Request $request, Task $task): JsonResponse
+    public function updateTaskStatus(Request $request, Task $task): RedirectResponse
     {
-        $this->ensureManager($request);
+        Gate::authorize('manage-operations');
+        $data = $request->validate(['status' => ['required', Rule::in(['intake', 'strategy', 'design', 'frontend', 'staging', 'qa', 'review', 'done'])]]);
+        DB::transaction(function () use ($request, $task, $data) {
+            $before = $task->status;
+            if ($before === $data['status']) {
+                return;
+            }
+            $task->update($this->completionData($task, $data['status']));
+            $this->recordStatus($task, $before, $data['status'], $request->user());
+        });
+
+        return back()->with('success', 'Status task berhasil dipindahkan.');
+    }
+
+    public function destroyTask(Task $task): RedirectResponse
+    {
+        Gate::authorize('manage-operations');
         $task->delete();
-        return response()->json(['deleted' => true]);
+
+        return back()->with('success', 'Task berhasil dihapus.');
     }
 
-    public function storeCycle(Request $request): JsonResponse
+    public function storeCycle(CycleRequest $request): RedirectResponse
     {
-        $this->ensureCycleManager($request);
-        $cycle = DB::transaction(function () use ($request) {
-            [$data, $variants] = $this->cycleData($request);
+        Gate::authorize('manage-cycles');
+        DB::transaction(function () use ($request) {
+            [$data, $variants] = $this->cycleData($request->validated());
             $cycle = Cycle::create(['id' => (string) Str::uuid(), ...$data]);
             $this->replaceVariants($cycle, $variants);
-            return $cycle;
         });
-        return response()->json(['record' => $this->cycle($cycle->load('variants'))], 201);
+
+        return back()->with('success', 'Cycle KPI berhasil ditambahkan.');
     }
 
-    public function updateCycle(Request $request, Cycle $cycle): JsonResponse
+    public function updateCycle(CycleRequest $request, Cycle $cycle): RedirectResponse
     {
-        $this->ensureCycleManager($request);
+        Gate::authorize('manage-cycles');
         DB::transaction(function () use ($request, $cycle) {
-            [$data, $variants] = $this->cycleData($request, $cycle);
+            [$data, $variants] = $this->cycleData($request->validated());
             $cycle->update($data);
             $cycle->variants()->delete();
             $this->replaceVariants($cycle, $variants);
         });
-        return response()->json(['record' => $this->cycle($cycle->fresh()->load('variants'))]);
+
+        return back()->with('success', 'Cycle KPI berhasil diperbarui.');
     }
 
-    public function destroyCycle(Request $request, Cycle $cycle): JsonResponse
+    public function destroyCycle(Cycle $cycle): RedirectResponse
     {
-        $this->ensureCycleManager($request);
+        Gate::authorize('manage-cycles');
         $cycle->delete();
-        return response()->json(['deleted' => true]);
+
+        return back()->with('success', 'Cycle KPI berhasil dihapus.');
     }
 
-    public function storeFeedback(Request $request): JsonResponse
+    public function storeFeedback(FeedbackRequest $request): RedirectResponse
     {
-        $this->ensureManager($request);
-        $feedback = Feedback::create(['id' => (string) Str::uuid(), ...$this->feedbackData($request)]);
-        return response()->json(['record' => $this->feedback($feedback)], 201);
+        Gate::authorize('manage-operations');
+        Feedback::create(['id' => (string) Str::uuid(), ...$this->feedbackData($request->validated())]);
+
+        return back()->with('success', 'Feedback berhasil ditambahkan.');
     }
 
-    public function updateFeedback(Request $request, Feedback $feedback): JsonResponse
+    public function updateFeedback(FeedbackRequest $request, Feedback $feedback): RedirectResponse
     {
-        $this->ensureManager($request);
-        $feedback->update($this->feedbackData($request));
-        return response()->json(['record' => $this->feedback($feedback->fresh())]);
+        Gate::authorize('manage-operations');
+        $feedback->update($this->feedbackData($request->validated()));
+
+        return back()->with('success', 'Feedback berhasil diperbarui.');
     }
 
-    public function updateFeedbackAction(Request $request, Feedback $feedback): JsonResponse
+    public function updateFeedbackAction(Request $request, Feedback $feedback): RedirectResponse
     {
-        abort_unless(in_array($request->user()?->role, UserRole::cases(), true), 403);
-        $data = $request->validate(['action' => ['nullable', 'string', 'max:10000']]);
+        Gate::authorize('update-feedback-action');
+        $data = $request->validate(['action' => ['nullable', 'string', 'max:20000']]);
         $feedback->update(['action' => $data['action'] ?? '']);
-        return response()->json(['record' => $this->feedback($feedback->fresh())]);
+
+        return back()->with('success', 'Tindak lanjut feedback berhasil diperbarui.');
     }
 
-    public function destroyFeedback(Request $request, Feedback $feedback): JsonResponse
+    public function destroyFeedback(Feedback $feedback): RedirectResponse
     {
-        $this->ensureManager($request);
+        Gate::authorize('manage-operations');
         $feedback->delete();
-        return response()->json(['deleted' => true]);
+
+        return back()->with('success', 'Feedback berhasil dihapus.');
     }
 
-    private function clientData(Request $request, ?Client $client = null): array
+    public function allData(?User $user): array
     {
-        return $request->validate([
-            'name' => ['required', 'string', 'max:255', Rule::unique('clients')->ignore($client?->id)],
-            'contract' => ['required', 'string', 'max:255'],
-            'bottleneck' => ['nullable', 'string', 'max:10000'],
-        ]);
+        if (! $user) {
+            return ['clients' => [], 'tasks' => [], 'cycles' => [], 'feedback' => []];
+        }
+        $canReadCycles = in_array($user->role, [UserRole::COO, UserRole::ProjectManager, UserRole::DigitalMarketer, UserRole::CMO], true);
+
+        return [
+            'clients' => Client::query()->orderBy('created_at')->get()->map(fn ($value) => $this->client($value))->values(),
+            'tasks' => Task::query()->orderBy('created_at')->get()->map(fn ($value) => $this->task($value))->values(),
+            'cycles' => $canReadCycles ? Cycle::query()->with('variants')->orderBy('client_id')->orderBy('cycle')->get()->map(fn ($value) => $this->cycle($value))->values() : [],
+            'feedback' => Feedback::query()->orderByDesc('date')->orderByDesc('created_at')->get()->map(fn ($value) => $this->feedback($value))->values(),
+        ];
     }
 
-    private function taskData(Request $request): array
+    private function taskData(array $data, ?Task $task = null): array
     {
-        $data = $request->validate([
-            'client' => ['required', 'exists:clients,id'], 'name' => ['required', 'string', 'max:255'],
-            'status' => ['required', Rule::in(self::STATUSES)], 'pic' => ['required', Rule::in(self::ROLES)],
-            'due' => ['required', 'date_format:Y-m-d'], 'cycle' => ['required', 'integer', 'min:0', 'max:999'],
-            'revision' => ['required', 'integer', 'min:0'], 'priority' => ['required', Rule::in(['normal', 'urgent'])],
-            'type' => ['required', Rule::in(['feature', 'hotfix'])], 'brief' => ['nullable', 'string', 'max:20000'],
-            'blocked' => ['required', 'boolean'],
-        ]);
-        $data['client_id'] = $data['client']; unset($data['client']);
-        return $data;
+        return [
+            'client_id' => $data['client'], 'name' => $data['name'], 'pic' => $data['pic'], 'due' => $data['due'],
+            'cycle' => $data['cycle'], 'revision' => $data['revision'], 'priority' => $data['priority'], 'type' => $data['type'],
+            'brief' => $data['brief'] ?? '', 'blocked' => $data['blocked'],
+            ...$this->completionData($task, $data['status'], $data['due']),
+        ];
     }
 
-    private function cycleData(Request $request, ?Cycle $cycle = null): array
+    private function completionData(?Task $task, string $status, ?string $due = null): array
     {
-        $data = $request->validate([
-            'client' => ['required', 'exists:clients,id'],
-            'cycle' => ['required', 'integer', 'min:0', 'max:999', Rule::unique('cycles')->where(fn ($q) => $q->where('client_id', $request->input('client')))->ignore($cycle?->id)],
-            'periode' => ['required', 'string', 'max:255'], 'updateDate' => ['required', 'date_format:Y-m-d'],
-            'status' => ['required', Rule::in(self::CYCLE_STATUSES)], 'layer' => ['nullable', 'string', 'max:255'],
-            'bottleneck' => ['nullable', 'string', 'max:10000'], 'primaryMetric' => ['required', 'string', 'max:255'],
-            'hypothesis' => ['nullable', 'string', 'max:10000'], 'optimization' => ['nullable', 'string', 'max:10000'],
-            'variants' => ['required', 'array', 'min:1'], 'variants.*.id' => ['nullable', 'string', 'max:255'],
-            'variants.*.label' => ['required', 'string', 'max:255'], 'variants.*.isControl' => ['required', 'boolean'],
-            'variants.*.targetVisit' => ['nullable', 'integer', 'min:0'], 'variants.*.realVisit' => ['nullable', 'integer', 'min:0'],
-            'variants.*.bounceRate' => ['nullable', 'numeric', 'min:0', 'max:100'], 'variants.*.leadRate' => ['nullable', 'numeric', 'min:0', 'max:100'],
-            'variants.*.intentRate' => ['nullable', 'numeric', 'min:0', 'max:100'],
-        ]);
-        $variants = $data['variants']; unset($data['variants']);
-        if (collect($variants)->where('isControl', true)->count() !== 1) throw ValidationException::withMessages(['variants' => 'Cycle harus memiliki tepat satu control.']);
-        if (($data['cycle'] === 0 && count($variants) !== 1) || ($data['cycle'] > 0 && count($variants) < 2)) throw ValidationException::withMessages(['variants' => 'Cycle 0 membutuhkan satu baseline; cycle uji membutuhkan control dan varian uji.']);
-        if (collect($variants)->pluck('label')->map(fn ($v) => strtolower(trim($v)))->duplicates()->isNotEmpty()) throw ValidationException::withMessages(['variants' => 'Nama setiap varian harus berbeda.']);
-        if ($data['cycle'] === 0 && collect($variants)->contains(fn ($v) => collect(['targetVisit','realVisit','bounceRate','leadRate','intentRate'])->contains(fn ($key) => $v[$key] === null))) throw ValidationException::withMessages(['variants' => 'Semua data baseline Cycle 0 wajib diisi.']);
-        $data = ['client_id' => $data['client'], 'cycle' => $data['cycle'], 'periode' => $data['periode'], 'update_date' => $data['updateDate'], 'status' => $data['cycle'] === 0 ? 'Baseline' : $data['status'], 'layer' => $data['layer'] ?? '', 'bottleneck' => $data['bottleneck'] ?? '', 'primary_metric' => $data['primaryMetric'], 'hypothesis' => $data['hypothesis'] ?? '', 'optimization' => $data['optimization'] ?? ''];
-        return [$data, $variants];
+        if ($status !== 'done') {
+            return ['status' => $status, 'completed_at' => null, 'due_at_completion' => null];
+        }
+        if ($task?->status === 'done' && $task->completed_at) {
+            return ['status' => $status, 'completed_at' => $task->completed_at, 'due_at_completion' => $task->due_at_completion];
+        }
+
+        return ['status' => $status, 'completed_at' => today()->toDateString(), 'due_at_completion' => $due ?? $task?->due?->format('Y-m-d')];
     }
 
-    private function feedbackData(Request $request): array
+    private function recordStatus(Task $task, ?string $from, string $to, User $actor): void
     {
-        $data = $request->validate([
-            'client' => ['required', 'exists:clients,id'], 'date' => ['required', 'date_format:Y-m-d'],
-            'phase' => ['required', Rule::in([30, 50, 90])], 'from' => ['required', Rule::in(['COO','Developer','Creative','Digital Marketer','Project Manager'])],
-            'fromType' => ['required', Rule::in(['pm','owner','client'])], 'topic' => ['required', 'string', 'max:255'],
-            'details' => ['required', 'string', 'max:20000'], 'priority' => ['required', Rule::in([1,2,3])], 'action' => ['nullable', 'string', 'max:20000'],
-        ]);
-        return ['client_id' => $data['client'], 'date' => $data['date'], 'phase' => $data['phase'], 'from' => $data['from'], 'from_type' => $data['fromType'], 'topic' => $data['topic'], 'details' => $data['details'], 'priority' => $data['priority'], 'action' => $data['action'] ?? ''];
+        $task->statusEvents()->create(['from_status' => $from, 'to_status' => $to, 'changed_by' => $actor->id, 'due_snapshot' => $task->due]);
+    }
+
+    private function cycleData(array $data): array
+    {
+        $variants = $data['variants'];
+
+        return [[
+            'client_id' => $data['client'], 'cycle' => $data['cycle'], 'periode' => $data['periode'],
+            'update_date' => $data['updateDate'], 'status' => $data['cycle'] === 0 ? 'Baseline' : $data['status'],
+            'layer' => $data['layer'] ?? '', 'bottleneck' => $data['bottleneck'] ?? '', 'primary_metric' => $data['primaryMetric'],
+            'hypothesis' => $data['hypothesis'] ?? '', 'optimization' => $data['optimization'] ?? '',
+        ], $variants];
+    }
+
+    private function feedbackData(array $data): array
+    {
+        return ['client_id' => $data['client'], 'date' => $data['date'], 'phase' => $data['phase'], 'from' => $data['from'],
+            'from_type' => $data['fromType'], 'topic' => $data['topic'], 'details' => $data['details'], 'priority' => $data['priority'], 'action' => $data['action'] ?? ''];
     }
 
     private function replaceVariants(Cycle $cycle, array $variants): void
     {
-        foreach ($variants as $variant) $cycle->variants()->create(['id' => (string) Str::uuid(), 'label' => trim($variant['label']), 'is_control' => $variant['isControl'], 'target_visit' => $variant['targetVisit'], 'real_visit' => $variant['realVisit'], 'bounce_rate' => $variant['bounceRate'], 'lead_rate' => $variant['leadRate'], 'intent_rate' => $variant['intentRate']]);
+        foreach ($variants as $variant) {
+            $cycle->variants()->create([
+                'id' => (string) Str::uuid(), 'label' => trim($variant['label']), 'is_control' => $variant['isControl'],
+                'target_visit' => $variant['targetVisit'], 'real_visit' => $variant['realVisit'], 'bounce_rate' => $variant['bounceRate'],
+                'lead_rate' => $variant['leadRate'], 'intent_rate' => $variant['intentRate'],
+            ]);
+        }
     }
 
-    private function ensureManager(Request $request): void { abort_unless(in_array($request->user()?->role, [UserRole::COO, UserRole::ProjectManager], true), 403); }
-    private function ensureCycleManager(Request $request): void { abort_unless(in_array($request->user()?->role, [UserRole::COO, UserRole::ProjectManager, UserRole::DigitalMarketer], true), 403); }
-
-    public function allData(): array
+    private function client(Client $value): array
     {
-        return ['clients' => Client::orderBy('created_at')->get()->map(fn ($v) => $this->client($v))->values(), 'tasks' => Task::orderBy('created_at')->get()->map(fn ($v) => $this->task($v))->values(), 'cycles' => Cycle::with('variants')->orderBy('client_id')->orderBy('cycle')->get()->map(fn ($v) => $this->cycle($v))->values(), 'feedback' => Feedback::orderBy('date')->get()->map(fn ($v) => $this->feedback($v))->values()];
+        return ['id' => $value->id, 'name' => $value->name, 'contract' => $value->contract, 'bottleneck' => $value->bottleneck ?? ''];
     }
-    private function client(Client $v): array { return ['id' => $v->id, 'name' => $v->name, 'contract' => $v->contract, 'bottleneck' => $v->bottleneck ?? '']; }
-    private function task(Task $v): array { return ['id' => $v->id, 'name' => $v->name, 'client' => $v->client_id, 'status' => $v->status, 'pic' => $v->pic, 'due' => $v->due->format('Y-m-d'), 'cycle' => $v->cycle, 'revision' => $v->revision, 'priority' => $v->priority, 'type' => $v->type, 'brief' => $v->brief ?? '', 'blocked' => $v->blocked]; }
-    private function cycle(Cycle $v): array { $variants = $v->variants->map(fn ($x) => ['id' => $x->id, 'label' => $x->label, 'isControl' => $x->is_control, 'targetVisit' => $x->target_visit, 'realVisit' => $x->real_visit, 'bounceRate' => $x->bounce_rate, 'leadRate' => $x->lead_rate, 'intentRate' => $x->intent_rate])->values()->all(); $real = collect($variants)->sum('realVisit'); $weighted = fn ($key) => $real > 0 && collect($variants)->where('realVisit', '>', 0)->every(fn ($x) => $x[$key] !== null) ? round(collect($variants)->sum(fn ($x) => $x[$key] * $x['realVisit']) / $real, 2) : null; return ['id' => $v->id, 'client' => $v->client_id, 'cycle' => $v->cycle, 'periode' => $v->periode, 'updateDate' => $v->update_date->format('Y-m-d'), 'status' => $v->status, 'layer' => $v->layer ?? '', 'bottleneck' => $v->bottleneck ?? '', 'primaryMetric' => $v->primary_metric, 'hypothesis' => $v->hypothesis ?? '', 'optimization' => $v->optimization ?? '', 'variants' => $variants, 'targetVisit' => collect($variants)->sum('targetVisit'), 'realVisit' => $real, 'bounceRate' => $weighted('bounceRate'), 'leadRate' => $weighted('leadRate'), 'intentRate' => $weighted('intentRate')]; }
-    private function feedback(Feedback $v): array { return ['id' => $v->id, 'client' => $v->client_id, 'date' => $v->date->format('Y-m-d'), 'phase' => $v->phase, 'from' => $v->from, 'fromType' => $v->from_type, 'topic' => $v->topic, 'details' => $v->details, 'priority' => $v->priority, 'action' => $v->action ?? '']; }
+
+    private function task(Task $value): array
+    {
+        return ['id' => $value->id, 'name' => $value->name, 'client' => $value->client_id, 'status' => $value->status,
+            'pic' => $value->pic, 'due' => $value->due->format('Y-m-d'), 'createdAt' => $value->created_at?->toDateString(),
+            'completedAt' => $value->completed_at?->format('Y-m-d'), 'dueAtCompletion' => $value->due_at_completion?->format('Y-m-d'),
+            'cycle' => $value->cycle, 'revision' => $value->revision, 'priority' => $value->priority, 'type' => $value->type,
+            'brief' => $value->brief ?? '', 'blocked' => $value->blocked];
+    }
+
+    private function cycle(Cycle $value): array
+    {
+        $variants = $value->variants->map(fn ($variant) => ['id' => $variant->id, 'label' => $variant->label,
+            'isControl' => $variant->is_control, 'targetVisit' => $variant->target_visit, 'realVisit' => $variant->real_visit,
+            'bounceRate' => $variant->bounce_rate, 'leadRate' => $variant->lead_rate, 'intentRate' => $variant->intent_rate])->values()->all();
+        $real = collect($variants)->sum('realVisit');
+        $weighted = fn ($key) => $real > 0 && collect($variants)->where('realVisit', '>', 0)->every(fn ($variant) => $variant[$key] !== null)
+            ? round(collect($variants)->sum(fn ($variant) => $variant[$key] * $variant['realVisit']) / $real, 2) : null;
+
+        return ['id' => $value->id, 'client' => $value->client_id, 'cycle' => $value->cycle, 'periode' => $value->periode,
+            'updateDate' => $value->update_date->format('Y-m-d'), 'status' => $value->status, 'layer' => $value->layer ?? '',
+            'bottleneck' => $value->bottleneck ?? '', 'primaryMetric' => $value->primary_metric, 'hypothesis' => $value->hypothesis ?? '',
+            'optimization' => $value->optimization ?? '', 'variants' => $variants, 'targetVisit' => collect($variants)->sum('targetVisit'),
+            'realVisit' => $real, 'bounceRate' => $weighted('bounceRate'), 'leadRate' => $weighted('leadRate'), 'intentRate' => $weighted('intentRate')];
+    }
+
+    private function feedback(Feedback $value): array
+    {
+        return ['id' => $value->id, 'client' => $value->client_id, 'date' => $value->date->format('Y-m-d'),
+            'phase' => $value->phase, 'from' => $value->from, 'fromType' => $value->from_type, 'topic' => $value->topic,
+            'details' => $value->details, 'priority' => $value->priority, 'action' => $value->action ?? ''];
+    }
 }

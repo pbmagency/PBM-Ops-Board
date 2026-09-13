@@ -25,7 +25,7 @@ class HomeTest extends TestCase
             ->assertOk()
             ->assertInertia(fn ($page) => $page
                 ->component('PbmOps')
-                ->has('users', 5)
+                ->has('users', 9)
                 ->where('users.0.email', 'coo@gmail.com'));
     }
 }

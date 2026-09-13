@@ -8,7 +8,7 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
     <title inertia>PBM Ops — Agency System</title>
     @viteReactRefresh
-    @vite(['resources/css/app.css', 'resources/js/app.jsx'])
+    @vite(['resources/css/app.css', 'resources/js/app.tsx'])
     @inertiaHead
 </head>
 <body>
