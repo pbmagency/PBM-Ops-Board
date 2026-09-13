@@ -3,6 +3,7 @@
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\OperationsController;
+use App\Http\Controllers\RolePermissionController;
 use App\Http\Controllers\TeamPerformanceController;
 use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
@@ -14,6 +15,7 @@ Route::middleware('auth')->group(function () {
     Route::post('/users', [UserController::class, 'store'])->name('users.store');
     Route::put('/users/{user}', [UserController::class, 'update'])->name('users.update');
     Route::delete('/users/{user}', [UserController::class, 'destroy'])->name('users.destroy');
+    Route::put('/role-permissions/{role}', [RolePermissionController::class, 'update'])->name('role-permissions.update');
 
     Route::post('/clients', [OperationsController::class, 'storeClient'])->name('clients.store');
     Route::put('/clients/{client}', [OperationsController::class, 'updateClient'])->name('clients.update');
@@ -33,5 +35,5 @@ Route::middleware('auth')->group(function () {
     Route::post('/team-reports', [TeamPerformanceController::class, 'storeReport'])->name('team-reports.store');
     Route::post('/team-kpi-definitions', [TeamPerformanceController::class, 'storeDefinition'])->name('team-kpi-definitions.store');
     Route::put('/team-kpi-definitions/{definition}', [TeamPerformanceController::class, 'updateDefinition'])->name('team-kpi-definitions.update');
-    Route::patch('/team-kpi-definitions/{definition}/toggle', [TeamPerformanceController::class, 'toggleDefinition'])->name('team-kpi-definitions.toggle');
+    Route::delete('/team-kpi-definitions/{definition}', [TeamPerformanceController::class, 'destroyDefinition'])->name('team-kpi-definitions.destroy');
 });

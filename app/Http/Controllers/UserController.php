@@ -13,7 +13,7 @@ class UserController
 {
     public function store(UserRequest $request): RedirectResponse
     {
-        Gate::authorize('manage-operations');
+        Gate::authorize('manage-users');
         User::create([...$request->validated(), 'email_verified_at' => now()]);
 
         return back()->with('success', 'User berhasil ditambahkan.');
@@ -21,7 +21,7 @@ class UserController
 
     public function update(UserRequest $request, User $user): RedirectResponse
     {
-        Gate::authorize('manage-operations');
+        Gate::authorize('manage-users');
         $data = $request->validated();
         $removesLastCoo = $user->role === UserRole::COO
             && $user->active
@@ -39,7 +39,7 @@ class UserController
 
     public function destroy(User $user): RedirectResponse
     {
-        Gate::authorize('manage-operations');
+        Gate::authorize('manage-users');
         if (request()->user()->is($user)) {
             throw ValidationException::withMessages(['user' => 'Akun yang sedang digunakan tidak dapat dihapus.']);
         }

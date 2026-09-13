@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\UserRole;
 use App\Http\Requests\ClientRequest;
 use App\Http\Requests\CycleRequest;
 use App\Http\Requests\FeedbackRequest;
@@ -23,7 +22,7 @@ class OperationsController
 {
     public function storeClient(ClientRequest $request): RedirectResponse
     {
-        Gate::authorize('manage-operations');
+        Gate::authorize('manage-clients');
         Client::create(['id' => (string) Str::uuid(), ...$request->validated()]);
 
         return back()->with('success', 'Client berhasil ditambahkan.');
@@ -31,7 +30,7 @@ class OperationsController
 
     public function updateClient(ClientRequest $request, Client $client): RedirectResponse
     {
-        Gate::authorize('manage-operations');
+        Gate::authorize('manage-clients');
         $client->update($request->validated());
 
         return back()->with('success', 'Client berhasil diperbarui.');
@@ -39,7 +38,7 @@ class OperationsController
 
     public function destroyClient(Client $client): RedirectResponse
     {
-        Gate::authorize('manage-operations');
+        Gate::authorize('manage-clients');
         $client->delete();
 
         return back()->with('success', 'Client dan data terkait berhasil dihapus.');
@@ -47,7 +46,7 @@ class OperationsController
 
     public function storeTask(TaskRequest $request): RedirectResponse
     {
-        Gate::authorize('manage-operations');
+        Gate::authorize('manage-tasks');
         DB::transaction(function () use ($request) {
             $task = Task::create(['id' => (string) Str::uuid(), ...$this->taskData($request->validated())]);
             $this->recordStatus($task, null, $task->status, $request->user());
@@ -58,7 +57,7 @@ class OperationsController
 
     public function updateTask(TaskRequest $request, Task $task): RedirectResponse
     {
-        Gate::authorize('manage-operations');
+        Gate::authorize('manage-tasks');
         DB::transaction(function () use ($request, $task) {
             $before = $task->status;
             $task->update($this->taskData($request->validated(), $task));
@@ -72,7 +71,7 @@ class OperationsController
 
     public function updateTaskStatus(Request $request, Task $task): RedirectResponse
     {
-        Gate::authorize('manage-operations');
+        Gate::authorize('manage-tasks');
         $data = $request->validate(['status' => ['required', Rule::in(['intake', 'strategy', 'design', 'frontend', 'staging', 'qa', 'review', 'done'])]]);
         DB::transaction(function () use ($request, $task, $data) {
             $before = $task->status;
@@ -88,7 +87,7 @@ class OperationsController
 
     public function destroyTask(Task $task): RedirectResponse
     {
-        Gate::authorize('manage-operations');
+        Gate::authorize('manage-tasks');
         $task->delete();
 
         return back()->with('success', 'Task berhasil dihapus.');
@@ -129,7 +128,7 @@ class OperationsController
 
     public function storeFeedback(FeedbackRequest $request): RedirectResponse
     {
-        Gate::authorize('manage-operations');
+        Gate::authorize('manage-feedback');
         Feedback::create(['id' => (string) Str::uuid(), ...$this->feedbackData($request->validated())]);
 
         return back()->with('success', 'Feedback berhasil ditambahkan.');
@@ -137,7 +136,7 @@ class OperationsController
 
     public function updateFeedback(FeedbackRequest $request, Feedback $feedback): RedirectResponse
     {
-        Gate::authorize('manage-operations');
+        Gate::authorize('manage-feedback');
         $feedback->update($this->feedbackData($request->validated()));
 
         return back()->with('success', 'Feedback berhasil diperbarui.');
@@ -154,7 +153,7 @@ class OperationsController
 
     public function destroyFeedback(Feedback $feedback): RedirectResponse
     {
-        Gate::authorize('manage-operations');
+        Gate::authorize('manage-feedback');
         $feedback->delete();
 
         return back()->with('success', 'Feedback berhasil dihapus.');
@@ -165,13 +164,16 @@ class OperationsController
         if (! $user) {
             return ['clients' => [], 'tasks' => [], 'cycles' => [], 'feedback' => []];
         }
-        $canReadCycles = in_array($user->role, [UserRole::COO, UserRole::ProjectManager, UserRole::DigitalMarketer, UserRole::CMO], true);
+        $readsClients = collect(['board', 'hub', 'kpi', 'feedback', 'clients'])->contains(fn (string $tab) => $user->canAccessTab($tab));
+        $readsTasks = $user->canAccessTab('board') || $user->canAccessTab('hub');
+        $readsCycles = $user->canAccessTab('kpi') || $user->canAccessTab('hub');
+        $readsFeedback = $user->canAccessTab('feedback');
 
         return [
-            'clients' => Client::query()->orderBy('created_at')->get()->map(fn ($value) => $this->client($value))->values(),
-            'tasks' => Task::query()->orderBy('created_at')->get()->map(fn ($value) => $this->task($value))->values(),
-            'cycles' => $canReadCycles ? Cycle::query()->with('variants')->orderBy('client_id')->orderBy('cycle')->get()->map(fn ($value) => $this->cycle($value))->values() : [],
-            'feedback' => Feedback::query()->orderByDesc('date')->orderByDesc('created_at')->get()->map(fn ($value) => $this->feedback($value))->values(),
+            'clients' => $readsClients ? Client::query()->orderBy('created_at')->get()->map(fn ($value) => $this->client($value))->values() : [],
+            'tasks' => $readsTasks ? Task::query()->orderBy('created_at')->get()->map(fn ($value) => $this->task($value))->values() : [],
+            'cycles' => $readsCycles ? Cycle::query()->with('variants')->orderBy('client_id')->orderBy('cycle')->get()->map(fn ($value) => $this->cycle($value))->values() : [],
+            'feedback' => $readsFeedback ? Feedback::query()->orderByDesc('date')->orderByDesc('created_at')->get()->map(fn ($value) => $this->feedback($value))->values() : [],
         ];
     }
 

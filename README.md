@@ -9,10 +9,11 @@ PBM Ops adalah aplikasi internal agency berbasis Laravel 12, Inertia, React 19, 
 - Client Performance KPI dengan CRUD cycle, Cycle 0 sebagai baseline launch pertama, dan banyak varian uji per cycle.
 - Team Performance KPI sederhana untuk angka KPI serta hasil utama, penyebab target tidak tercapai, rencana minggu depan, dan keputusan yang dibutuhkan.
 - Riwayat KPI tim dengan bar chart dan pembatasan hierarki laporan.
-- KPI Settings dinamis khusus COO.
+- KPI Settings dinamis dengan filter role dan penghapusan KPI tanpa merusak snapshot laporan lama.
 - Feedback Loop dengan CRUD, pagination, dan izin edit tindak lanjut untuk Developer, Creative, dan Digital Marketer.
 - CRUD client dan user, termasuk aktivasi akun serta assign role.
-- Autentikasi email/password Laravel dan authorization di server.
+- Pengaturan tab, otoritas tindakan, dan cakupan rekap KPI secara dinamis untuk setiap role.
+- Autentikasi email/password Laravel dan authorization dinamis di server.
 - Navigasi desktop serta breadcrumb mobile/tablet yang memuat role dan logout.
 
 ## Menjalankan aplikasi

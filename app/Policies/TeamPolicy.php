@@ -9,12 +9,12 @@ class TeamPolicy
 {
     public function manageDefinitions(User $user): bool
     {
-        return $user->active && $user->role->value === 'coo';
+        return $user->hasAbility('team_kpi.manage');
     }
 
     public function saveOwnReport(User $user, int $ownerId): bool
     {
-        return $user->active && $user->id === $ownerId;
+        return $user->id === $ownerId && $user->hasAbility('team_reports.submit');
     }
 
     public function viewReport(User $user, TeamReport $report): bool
@@ -27,8 +27,6 @@ class TeamPolicy
             return true;
         }
 
-        $roles = $user->role->readableTeamRoles();
-
-        return $roles === null || in_array($report->role, array_map(fn ($role) => $role->value, $roles), true);
+        return in_array($report->role, $user->readableTeamRoles(), true);
     }
 }

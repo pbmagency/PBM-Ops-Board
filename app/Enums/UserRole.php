@@ -14,43 +14,53 @@ enum UserRole: string
     case ContentSpecialist = 'content-specialist';
     case AppointmentSetter = 'appointment-setter';
 
-    public function isOperationsManager(): bool
-    {
-        return in_array($this, [self::COO, self::ProjectManager], true);
-    }
-
-    public function canManageCycles(): bool
-    {
-        return $this->isOperationsManager() || $this === self::DigitalMarketer;
-    }
-
-    public function canUpdateFeedbackAction(): bool
-    {
-        return $this->isOperationsManager() || in_array($this, [
-            self::Developer,
-            self::Creative,
-            self::DigitalMarketer,
-        ], true);
-    }
-
-    /** @return list<UserRole>|null Null means every role. */
-    public function readableTeamRoles(): ?array
+    /** @return list<string> */
+    public function defaultTabs(): array
     {
         return match ($this) {
-            self::COO, self::ProjectManager => null,
+            self::COO, self::ProjectManager => ['board', 'hub', 'kpi', 'team', 'feedback', 'clients', 'users'],
+            self::Developer, self::Creative => ['board', 'team', 'feedback'],
+            self::DigitalMarketer, self::CMO => ['board', 'kpi', 'team', 'feedback'],
+            default => ['board', 'team', 'feedback'],
+        };
+    }
+
+    /** @return list<string> */
+    public function defaultAbilities(): array
+    {
+        return match ($this) {
+            self::COO => [
+                'clients.manage', 'tasks.manage', 'cycles.manage', 'feedback.manage', 'feedback.update_action',
+                'users.manage', 'team_reports.submit', 'team_kpi.manage', 'role_permissions.manage',
+            ],
+            self::ProjectManager => [
+                'clients.manage', 'tasks.manage', 'cycles.manage', 'feedback.manage', 'feedback.update_action',
+                'users.manage', 'team_reports.submit', 'role_permissions.manage',
+            ],
+            self::DigitalMarketer => ['cycles.manage', 'feedback.update_action', 'team_reports.submit'],
+            self::Developer, self::Creative => ['feedback.update_action', 'team_reports.submit'],
+            default => ['team_reports.submit'],
+        };
+    }
+
+    /** @return list<string> */
+    public function defaultReadableTeamRoles(): array
+    {
+        return match ($this) {
+            self::COO, self::ProjectManager => array_map(fn (self $role) => $role->value, self::cases()),
             self::CMO => [
-                self::CMO,
-                self::MarketingManager,
-                self::DigitalMarketer,
-                self::ContentSpecialist,
-                self::AppointmentSetter,
+                self::CMO->value,
+                self::MarketingManager->value,
+                self::DigitalMarketer->value,
+                self::ContentSpecialist->value,
+                self::AppointmentSetter->value,
             ],
             self::MarketingManager => [
-                self::MarketingManager,
-                self::ContentSpecialist,
-                self::AppointmentSetter,
+                self::MarketingManager->value,
+                self::ContentSpecialist->value,
+                self::AppointmentSetter->value,
             ],
-            default => [$this],
+            default => [$this->value],
         };
     }
 }

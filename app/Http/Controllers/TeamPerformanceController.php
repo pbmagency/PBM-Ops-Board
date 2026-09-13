@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\UserRole;
 use App\Http\Requests\TeamKpiDefinitionRequest;
 use App\Http\Requests\TeamReportRequest;
 use App\Models\TeamKpiDefinition;
@@ -129,12 +128,12 @@ class TeamPerformanceController
         return back()->with('success', 'KPI tim berhasil diperbarui.');
     }
 
-    public function toggleDefinition(TeamKpiDefinition $definition): RedirectResponse
+    public function destroyDefinition(TeamKpiDefinition $definition): RedirectResponse
     {
         Gate::authorize('manage-team-kpi-definitions');
-        $definition->update(['active' => ! $definition->active]);
+        $definition->delete();
 
-        return back()->with('success', $definition->active ? 'KPI tim diaktifkan.' : 'KPI tim dinonaktifkan.');
+        return back()->with('success', 'KPI tim berhasil dihapus. Riwayat laporan lama tetap utuh.');
     }
 
     public function allData(?User $user): array
@@ -143,17 +142,23 @@ class TeamPerformanceController
             return ['definitions' => [], 'reports' => []];
         }
 
-        $roles = $user->role->readableTeamRoles();
+        if (! $user->canAccessTab('team')) {
+            return ['definitions' => [], 'reports' => []];
+        }
+
+        $roles = $user->readableTeamRoles();
         $reports = TeamReport::query()->with('metrics')->orderBy('week')->orderBy('user_id');
-        if ($roles !== null) {
-            $reports->where(function ($query) use ($user, $roles) {
-                $query->where('user_id', $user->id)
-                    ->orWhereIn('role', array_map(fn (UserRole $role) => $role->value, $roles));
-            });
+        $reports->where(function ($query) use ($user, $roles) {
+            $query->where('user_id', $user->id)->orWhereIn('role', $roles);
+        });
+
+        $definitions = TeamKpiDefinition::query()->orderBy('role')->orderBy('created_at');
+        if (! $user->hasAbility('team_kpi.manage')) {
+            $definitions->where('role', $user->role->value);
         }
 
         return [
-            'definitions' => TeamKpiDefinition::query()->orderBy('role')->orderBy('created_at')->get()->map(fn ($item) => $this->definition($item))->values(),
+            'definitions' => $definitions->get()->map(fn ($item) => $this->definition($item))->values(),
             'reports' => $reports->get()->map(fn ($item) => $this->report($item))->values(),
         ];
     }
@@ -164,13 +169,15 @@ class TeamPerformanceController
             return User::query()->where('active', true)->whereIn('email', User::DEMO_EMAILS)->orderBy('id')->get()->map(fn ($item) => $this->user($item))->all();
         }
 
-        $roles = $user->role->readableTeamRoles();
-        $query = User::query()->orderBy('id');
-        if ($roles !== null) {
-            $query->where(function ($query) use ($user, $roles) {
-                $query->whereKey($user->id)->orWhereIn('role', array_map(fn (UserRole $role) => $role->value, $roles));
-            });
+        if ($user->canAccessTab('users')) {
+            return User::query()->orderBy('id')->get()->map(fn ($item) => $this->user($item))->all();
         }
+
+        $roles = $user->readableTeamRoles();
+        $query = User::query()->orderBy('id');
+        $query->where(function ($query) use ($user, $roles) {
+            $query->whereKey($user->id)->orWhereIn('role', $roles);
+        });
 
         return $query->get()->map(fn ($item) => $this->user($item))->all();
     }

@@ -8,6 +8,7 @@ use App\Models\User;
 use Database\Seeders\RoleUserSeeder;
 use Database\Seeders\TeamPerformanceSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class TeamPerformanceTest extends TestCase
@@ -57,7 +58,7 @@ class TeamPerformanceTest extends TestCase
         $this->actingAs($creative)->post('/team-reports', $payload)->assertForbidden();
     }
 
-    public function test_only_coo_can_manage_dynamic_kpi_definitions(): void
+    public function test_only_authorized_role_can_manage_and_delete_dynamic_kpi_definitions(): void
     {
         $payload = [
             'id' => '', 'role' => 'developer', 'name' => 'Deployment Success Rate', 'target' => 98,
@@ -66,8 +67,14 @@ class TeamPerformanceTest extends TestCase
 
         $this->actingAs($this->user('coo@gmail.com'))->post('/team-kpi-definitions', $payload)->assertRedirect();
         $definition = TeamKpiDefinition::where('name', 'Deployment Success Rate')->firstOrFail();
-        $this->actingAs($this->user('coo@gmail.com'))->patch("/team-kpi-definitions/{$definition->id}/toggle")->assertRedirect();
-        $this->assertFalse($definition->fresh()->active);
+        $this->actingAs($this->user('coo@gmail.com'))->delete("/team-kpi-definitions/{$definition->id}")->assertRedirect();
+        $this->assertDatabaseMissing('team_kpi_definitions', ['id' => $definition->id]);
+
+        $historical = TeamKpiDefinition::where('role', 'developer')->firstOrFail();
+        $snapshotCount = DB::table('team_report_metrics')->where('definition_id', $historical->id)->count();
+        $this->assertGreaterThan(0, $snapshotCount);
+        $this->actingAs($this->user('coo@gmail.com'))->delete("/team-kpi-definitions/{$historical->id}")->assertRedirect();
+        $this->assertSame($snapshotCount, DB::table('team_report_metrics')->whereNull('definition_id')->count());
 
         $this->actingAs($this->user('projectmanager@gmail.com'))->post('/team-kpi-definitions', [...$payload, 'name' => 'Forbidden'])->assertForbidden();
     }

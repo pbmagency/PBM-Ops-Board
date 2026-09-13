@@ -22,28 +22,6 @@ const ROLE_LABELS = {
   "content-specialist": "Content Specialist",
   "appointment-setter": "Appointment Setter",
 };
-const MANAGERS = new Set([
-  "coo",
-  "project-manager",
-  "cmo",
-  "marketing-manager",
-]);
-const REPORT_ACCESS = {
-  coo: "all",
-  "project-manager": "all",
-  cmo: new Set([
-    "cmo",
-    "marketing-manager",
-    "digital-marketer",
-    "content-specialist",
-    "appointment-setter",
-  ]),
-  "marketing-manager": new Set([
-    "marketing-manager",
-    "content-specialist",
-    "appointment-setter",
-  ]),
-};
 const PERIOD_LABEL = {
   weekly: "Minggu ini",
   monthly: "Progres bulan ini",
@@ -337,11 +315,10 @@ export function newTeamReport(team, user, week) {
   };
 }
 
-export function canTeamRead(actor, report) {
+export function canTeamRead(actor, report, reportRoles = [actor?.role]) {
   if (!actor) return false;
   if (actor.id === report.userId) return true;
-  const access = REPORT_ACCESS[actor.role];
-  return access === "all" || Boolean(access?.has(report.role));
+  return reportRoles.includes(report.role);
 }
 
 // Kept as an exported compatibility hook; written review is intentionally disabled.
@@ -420,120 +397,6 @@ export function simplifyTeamData(oldTeam, users, now = teamWeek()) {
   return fresh;
 }
 
-export function updateTeam(team, command, actor) {
-  if (!actor?.active) throw new Error("Sesi tidak aktif.");
-  if (["save-definition", "toggle-definition"].includes(command.type)) {
-    if (actor.role !== "coo")
-      throw new Error("Hanya COO yang dapat mengatur KPI tim.");
-    const next = copy(team);
-    if (command.type === "toggle-definition") {
-      const index = next.definitions.findIndex(
-        (item) => item.id === command.definitionId,
-      );
-      if (index < 0) throw new Error("KPI tidak ditemukan.");
-      next.definitions[index].active = !next.definitions[index].active;
-      return next;
-    }
-
-    const source = command.definition || {};
-    const name = String(source.name || "").trim();
-    const role = String(source.role || "");
-    const unit = String(source.unit || "").trim();
-    const period = ["weekly", "monthly", "quarterly"].includes(source.period)
-      ? source.period
-      : "weekly";
-    const target =
-      source.target === "" || source.target == null
-        ? null
-        : Number(source.target);
-    const direction = target === null ? "observe" : source.direction || "min";
-    const high =
-      direction === "range" && source.high !== "" && source.high != null
-        ? Number(source.high)
-        : null;
-    if (!ROLE_LABELS[role]) throw new Error("Role KPI tidak valid.");
-    if (!name) throw new Error("Nama KPI wajib diisi.");
-    if (!unit) throw new Error("Unit KPI wajib diisi.");
-    if (target !== null && (!Number.isFinite(target) || target < 0))
-      throw new Error("Target KPI harus berupa angka nonnegatif.");
-    if (direction === "range" && (!Number.isFinite(high) || high < target))
-      throw new Error(
-        "Batas atas harus sama dengan atau lebih besar dari target.",
-      );
-    const existingIndex = next.definitions.findIndex(
-      (item) => item.id === source.id,
-    );
-    const duplicate = next.definitions.some(
-      (item, index) =>
-        index !== existingIndex &&
-        item.role === role &&
-        item.name.trim().toLowerCase() === name.toLowerCase(),
-    );
-    if (duplicate)
-      throw new Error("Nama KPI sudah dipakai untuk role tersebut.");
-    const definition = {
-      id: source.id || crypto.randomUUID(),
-      role,
-      name,
-      target,
-      high,
-      unit,
-      direction,
-      period,
-      effective: source.effective || teamWeek(),
-      active: source.active !== false,
-    };
-    if (existingIndex >= 0) next.definitions[existingIndex] = definition;
-    else next.definitions.push(definition);
-    return next;
-  }
-  if (command.type !== "save") throw new Error("Tindakan tidak tersedia.");
-  if (command.report?.userId !== actor.id)
-    throw new Error("Anda hanya dapat mengisi laporan sendiri.");
-
-  const next = copy(team);
-  const reportId = `${actor.id}:${command.report.week}`;
-  const index = next.reports.findIndex((item) => item.id === reportId);
-  const original =
-    index >= 0
-      ? next.reports[index]
-      : newTeamReport(next, actor, command.report.week);
-  const metrics = original.metrics.map((metric) => {
-    const incoming = command.report.metrics?.find(
-      (item) => item.id === metric.id,
-    );
-    if (!incoming) throw new Error(`${metric.name} belum tersedia.`);
-    const value =
-      incoming.value === "" || incoming.value == null
-        ? null
-        : Number(incoming.value);
-    if (!Number.isFinite(value) && value !== null)
-      throw new Error(`${metric.name} harus berupa angka.`);
-    if (value !== null && value < 0)
-      throw new Error(`${metric.name} tidak boleh negatif.`);
-    if (metric.unit === "%" && value > 100)
-      throw new Error(`${metric.name} tidak boleh lebih dari 100%.`);
-    if (metric.unit === "/ 5" && value > 5)
-      throw new Error(`${metric.name} tidak boleh lebih dari 5.`);
-    return { ...metric, value };
-  });
-
-  const report = {
-    ...original,
-    metrics,
-    summary: String(command.report.summary || ""),
-    cause: String(command.report.cause || ""),
-    plan: String(command.report.plan || ""),
-    decision: String(command.report.decision || ""),
-    status: "saved",
-    demo: false,
-    updatedAt: new Date().toISOString(),
-  };
-  if (index >= 0) next.reports[index] = report;
-  else next.reports.push(report);
-  return next;
-}
-
 function StatusBadge({ state }) {
   const styles = {
     hit: "border-emerald-400/25 bg-emerald-400/10 text-emerald-300",
@@ -608,6 +471,9 @@ export default function TeamPerformance({
   team,
   users,
   currentUser,
+  reportRoles,
+  canSubmit,
+  canManageSettings,
   dispatch,
 }) {
   const [week, setWeek] = useState(() => shiftTeamWeek(teamWeek(), -1));
@@ -616,12 +482,16 @@ export default function TeamPerformance({
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const readableReports = team.reports.filter((report) =>
-    canTeamRead(currentUser, report),
+    canTeamRead(currentUser, report, reportRoles),
   );
   const visibleUsers = users.filter(
     (user) =>
       user.active &&
-      canTeamRead(currentUser, { userId: user.id, role: user.role }),
+      canTeamRead(
+        currentUser,
+        { userId: user.id, role: user.role },
+        reportRoles,
+      ),
   );
   const rows = visibleUsers.map((user) => ({
     user,
@@ -677,6 +547,7 @@ export default function TeamPerformance({
         report={current}
         users={users}
         currentUser={currentUser}
+        canSubmit={canSubmit}
         onBack={() => setOpened(null)}
         onSave={save}
       />
@@ -716,7 +587,7 @@ export default function TeamPerformance({
         >
           Riwayat
         </button>
-        {currentUser.role === "coo" && (
+        {canManageSettings && (
           <button
             className={`ops-button ${page === "settings" ? "ops-primary" : ""}`}
             onClick={() => setPage("settings")}
@@ -745,10 +616,10 @@ export default function TeamPerformance({
               "Pengaturan KPI sudah tersimpan.",
             )
           }
-          onToggle={(definitionId, active) =>
+          onDelete={(definitionId) =>
             changeSettings(
-              { type: "toggle-definition", definitionId },
-              `KPI sudah ${active ? "dinonaktifkan" : "diaktifkan"}.`,
+              { type: "delete-definition", definitionId },
+              "KPI berhasil dihapus. Riwayat laporan lama tetap utuh.",
             )
           }
         />
@@ -761,6 +632,7 @@ export default function TeamPerformance({
           currentUser={currentUser}
           ownReport={ownReport}
           ownStored={ownStored}
+          canSubmit={canSubmit}
           onOpen={setOpened}
         />
       )}
@@ -768,7 +640,7 @@ export default function TeamPerformance({
   );
 }
 
-function KpiSettings({ definitions, onSave, onToggle }) {
+function KpiSettings({ definitions, onSave, onDelete }) {
   const blank = {
     id: "",
     role: "developer",
@@ -782,18 +654,28 @@ function KpiSettings({ definitions, onSave, onToggle }) {
   };
   const [draft, setDraft] = useState(blank);
   const [editing, setEditing] = useState(false);
-  const sorted = [...definitions].sort(
+  const [roleFilter, setRoleFilter] = useState("all");
+  const sorted = definitions
+    .filter(
+      (definition) =>
+        roleFilter === "all" || definition.role === roleFilter,
+    )
+    .sort(
     (a, b) =>
       Object.keys(ROLE_LABELS).indexOf(a.role) -
         Object.keys(ROLE_LABELS).indexOf(b.role) ||
       a.name.localeCompare(b.name),
   );
 
-  function open(definition = blank) {
+  function open(definition = null) {
+    const source = definition || {
+      ...blank,
+      role: roleFilter === "all" ? blank.role : roleFilter,
+    };
     setDraft({
-      ...definition,
-      target: definition.target ?? "",
-      high: definition.high ?? "",
+      ...source,
+      target: source.target ?? "",
+      high: source.high ?? "",
     });
     setEditing(true);
   }
@@ -820,10 +702,25 @@ function KpiSettings({ definitions, onSave, onToggle }) {
             tetap utuh.
           </p>
         </div>
-        <button className="ops-button ops-primary" onClick={() => open()}>
-          <Plus size={17} />
-          <span>Tambah KPI</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            className={`${field} min-w-48`}
+            aria-label="Filter KPI berdasarkan role"
+            value={roleFilter}
+            onChange={(event) => setRoleFilter(event.target.value)}
+          >
+            <option value="all">Semua role</option>
+            {Object.entries(ROLE_LABELS).map(([id, label]) => (
+              <option key={id} value={id}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <button className="ops-button ops-primary" onClick={() => open()}>
+            <Plus size={17} />
+            <span>Tambah KPI</span>
+          </button>
+        </div>
       </div>
 
       {editing && (
@@ -955,7 +852,6 @@ function KpiSettings({ definitions, onSave, onToggle }) {
               <th className="px-3 py-3 font-medium">Nama KPI</th>
               <th className="px-3 py-3 font-medium">Target</th>
               <th className="px-3 py-3 font-medium">Periode</th>
-              <th className="px-3 py-3 font-medium">Status</th>
               <th className="px-3 py-3" />
             </tr>
           </thead>
@@ -966,17 +862,6 @@ function KpiSettings({ definitions, onSave, onToggle }) {
                 <td className="px-3 py-4 font-medium">{definition.name}</td>
                 <td className="px-3 py-4">{targetText(definition)}</td>
                 <td className="px-3 py-4">{PERIOD_LABEL[definition.period]}</td>
-                <td className="px-3 py-4">
-                  <span
-                    className={`inline-flex rounded-full border px-2.5 py-1 text-xs ${
-                      definition.active
-                        ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-300"
-                        : "border-zinc-700 bg-zinc-800 text-zinc-400"
-                    }`}
-                  >
-                    {definition.active ? "Aktif" : "Nonaktif"}
-                  </span>
-                </td>
                 <td className="px-3 py-4 text-right">
                   <div className="flex justify-end gap-2">
                     <button
@@ -986,10 +871,17 @@ function KpiSettings({ definitions, onSave, onToggle }) {
                       Ubah
                     </button>
                     <button
-                      className="ops-button"
-                      onClick={() => onToggle(definition.id, definition.active)}
+                      className="ops-button ops-danger"
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            `Hapus KPI “${definition.name}”? Riwayat laporan lama tetap tersimpan.`,
+                          )
+                        )
+                          onDelete(definition.id);
+                      }}
                     >
-                      {definition.active ? "Nonaktifkan" : "Aktifkan"}
+                      Hapus
                     </button>
                   </div>
                 </td>
@@ -997,6 +889,9 @@ function KpiSettings({ definitions, onSave, onToggle }) {
             ))}
           </tbody>
         </table>
+        {!sorted.length && (
+          <p className="ops-empty m-4">Belum ada KPI untuk filter role ini.</p>
+        )}
       </div>
     </div>
   );
@@ -1008,9 +903,15 @@ function WeekOverview({
   currentUser,
   ownReport,
   ownStored,
+  canSubmit,
   onOpen,
 }) {
-  const reports = rows.map((row) => row.report).filter(Boolean);
+  const [roleFilter, setRoleFilter] = useState("all");
+  const roleOptions = [...new Set(rows.map(({ user }) => user.role))];
+  const filteredRows = rows.filter(
+    ({ user }) => roleFilter === "all" || user.role === roleFilter,
+  );
+  const reports = filteredRows.map((row) => row.report).filter(Boolean);
   const weeklyMetrics = reports.flatMap((report) =>
     report.metrics.filter((metric) => metric.period === "weekly"),
   );
@@ -1028,7 +929,7 @@ function WeekOverview({
           [
             Users,
             "Laporan sudah diisi",
-            `${reports.length}/${rows.length}`,
+            `${reports.length}/${filteredRows.length}`,
             "text-violet-300",
           ],
           [CheckCircle2, "KPI mingguan hit target", hit, "text-emerald-300"],
@@ -1057,22 +958,46 @@ function WeekOverview({
                 : "Isi angka KPI dan empat catatan singkat sebelum meeting."}
             </p>
           </div>
-          <button
-            className="ops-button ops-primary"
-            onClick={() => onOpen(ownReport.id)}
-          >
-            {ownStored ? "Update KPI Saya" : "Isi KPI Saya"}
-          </button>
+          {canSubmit ? (
+            <button
+              className="ops-button ops-primary"
+              onClick={() => onOpen(ownReport.id)}
+            >
+              {ownStored ? "Update KPI Saya" : "Isi KPI Saya"}
+            </button>
+          ) : (
+            <span className="rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-400">
+              Akses pengisian dinonaktifkan
+            </span>
+          )}
         </div>
       </div>
 
-      {MANAGERS.has(currentUser.role) && (
+      {rows.some(({ user }) => user.id !== currentUser.id) && (
         <div className={`${panel} overflow-x-auto`}>
-          <div className="mb-4">
-            <h2 className="text-xl font-semibold">Rekap tim</h2>
-            <p className="mt-1 text-sm text-zinc-400">
-              Buka laporan untuk melihat angka dan bahan pembahasan meeting.
-            </p>
+          <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-semibold">Rekap tim minggu ini</h2>
+              <p className="mt-1 text-sm text-zinc-400">
+                Buka laporan untuk melihat angka dan bahan pembahasan meeting.
+              </p>
+            </div>
+            <label className="grid gap-1 text-xs text-zinc-400">
+              Filter role
+              <select
+                className={`${field} min-w-52`}
+                aria-label="Filter rekap minggu ini berdasarkan role"
+                value={roleFilter}
+                onChange={(event) => setRoleFilter(event.target.value)}
+              >
+                <option value="all">Semua role</option>
+                {roleOptions.map((role) => (
+                  <option key={role} value={role}>
+                    {ROLE_LABELS[role]}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
           <table className="w-full min-w-[680px] text-left text-sm">
             <thead className="text-zinc-500">
@@ -1085,7 +1010,7 @@ function WeekOverview({
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ user, report }) => {
+              {filteredRows.map(({ user, report }) => {
                 const metrics =
                   report?.metrics.filter(
                     (metric) => metric.period === "weekly",
@@ -1140,9 +1065,17 @@ function WeekOverview({
   );
 }
 
-function ReportForm({ report, users, currentUser, onBack, onSave }) {
+function ReportForm({
+  report,
+  users,
+  currentUser,
+  canSubmit,
+  onBack,
+  onSave,
+}) {
   const [draft, setDraft] = useState(() => copy(report));
   const own = report.userId === currentUser.id;
+  const editable = own && canSubmit;
   const owner = users.find((user) => user.id === report.userId);
 
   function changeMetric(id, value) {
@@ -1172,7 +1105,7 @@ function ReportForm({ report, users, currentUser, onBack, onSave }) {
           </div>
           <StatusBadge state={report.status === "saved" ? "saved" : "empty"} />
         </div>
-        {own && (
+        {editable && (
           <p className="mt-4 text-sm text-zinc-400">
             Masukkan angka aktual. Isi 0 jika hasilnya memang nol.
           </p>
@@ -1205,7 +1138,7 @@ function ReportForm({ report, users, currentUser, onBack, onSave }) {
                         Target {targetText(metric)}
                       </p>
                     </div>
-                    {own ? (
+                    {editable ? (
                       <label className="flex items-center gap-2">
                         <span className="sr-only">{metric.name}</span>
                         <input
@@ -1252,7 +1185,7 @@ function ReportForm({ report, users, currentUser, onBack, onSave }) {
         ].map(([key, label]) => (
           <label key={key} className="grid gap-2 text-sm text-zinc-300">
             {label}
-            {own ? (
+            {editable ? (
               <textarea
                 aria-label={label}
                 className={`${field} min-h-28 resize-y`}
@@ -1275,7 +1208,7 @@ function ReportForm({ report, users, currentUser, onBack, onSave }) {
         ))}
       </div>
 
-      {own && (
+      {editable && (
         <div className="flex justify-end">
           <button
             className="ops-button ops-primary px-5 py-3"

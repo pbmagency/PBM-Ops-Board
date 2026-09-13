@@ -3,7 +3,7 @@ import PbmOpsApp from "../features/ops/PbmOpsApp";
 import type { PbmOpsPageProps } from "../types/ops";
 
 export default function PbmOps() {
-  const { auth, users, operations, team, flash } =
+  const { auth, users, operations, team, permissions, flash } =
     usePage<PbmOpsPageProps>().props;
 
   return (
@@ -12,6 +12,7 @@ export default function PbmOps() {
       serverUsers={users}
       serverOperations={operations}
       serverTeam={team}
+      serverPermissions={permissions}
       flash={flash}
     />
   );

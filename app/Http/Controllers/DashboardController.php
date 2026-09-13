@@ -16,6 +16,7 @@ class DashboardController
             'users' => $team->visibleUsers($user),
             'operations' => $operations->allData($user),
             'team' => $team->allData($user),
+            'permissions' => RolePermissionController::payload($user),
         ]);
     }
 }

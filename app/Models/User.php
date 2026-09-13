@@ -50,4 +50,25 @@ class User extends Authenticatable
     {
         return $this->hasMany(TeamReport::class);
     }
+
+    public function permissionProfile(): RolePermission
+    {
+        return RolePermission::forRole($this->role);
+    }
+
+    public function canAccessTab(string $tab): bool
+    {
+        return $this->active && $this->permissionProfile()->allowsTab($tab);
+    }
+
+    public function hasAbility(string $ability): bool
+    {
+        return $this->active && $this->permissionProfile()->allows($ability);
+    }
+
+    /** @return list<string> */
+    public function readableTeamRoles(): array
+    {
+        return $this->permissionProfile()->readableTeamRoles();
+    }
 }

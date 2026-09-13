@@ -42,7 +42,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
-/* PBM Ops v5 — interactive frontend prototype; local browser storage only. */
+/* PBM Ops application UI. */
 
 const ACCENT = "#4F39F6";
 
@@ -4194,18 +4194,6 @@ function TabButton({ active, onClick, icon: Icon, children }) {
 const derive = (compute) => compute();
 const OpsContext = createContext(null);
 const ROLE_IDS = Object.keys(PIC);
-const FULL_ACCESS_ROLES = new Set(["coo", "project-manager"]);
-const TAB_ACCESS = {
-  coo: ["board", "hub", "kpi", "feedback", "clients", "users"],
-  "project-manager": ["board", "hub", "kpi", "feedback", "clients", "users"],
-  developer: ["board", "feedback"],
-  creative: ["board", "feedback"],
-  "digital-marketer": ["board", "kpi", "feedback"],
-  cmo: ["board", "kpi", "feedback", "team"],
-  "marketing-manager": ["board", "feedback", "team"],
-  "content-specialist": ["board", "feedback", "team"],
-  "appointment-setter": ["board", "feedback", "team"],
-};
 const TAB_META = [
   { id: "board", label: "Execution Board", icon: LayoutGrid },
   { id: "hub", label: "Operations Hub", icon: LayoutDashboard },
@@ -4215,22 +4203,43 @@ const TAB_META = [
   { id: "clients", label: "Clients", icon: Users },
   { id: "users", label: "Users & Roles", icon: Users },
 ];
-export function canRole(role, action, resource) {
-  if (!PIC[role]) return false;
-  if (action === "view")
-    return resource === "team" || TAB_ACCESS[role]?.includes(resource) || false;
-  if (FULL_ACCESS_ROLES.has(role)) return true;
-  if (
-    role === "digital-marketer" &&
-    resource === "cycles" &&
-    ["create", "update", "delete"].includes(action)
-  )
-    return true;
-  return (
-    resource === "feedback" &&
-    action === "update-action" &&
-    ["developer", "creative", "digital-marketer"].includes(role)
-  );
+const ABILITY_META = [
+  { id: "clients.manage", label: "CRUD client" },
+  { id: "tasks.manage", label: "CRUD dan pindah task" },
+  { id: "cycles.manage", label: "CRUD Client Performance KPI" },
+  { id: "feedback.manage", label: "CRUD feedback" },
+  { id: "feedback.update_action", label: "Edit tindak lanjut feedback" },
+  { id: "users.manage", label: "CRUD user dan assign role" },
+  { id: "team_reports.submit", label: "Isi KPI tim sendiri" },
+  { id: "team_kpi.manage", label: "Kelola KPI Settings" },
+  { id: "role_permissions.manage", label: "Kelola permission role" },
+];
+const ACTION_ABILITY = {
+  clients: "clients.manage",
+  tasks: "tasks.manage",
+  cycles: "cycles.manage",
+  feedback: "feedback.manage",
+  users: "users.manage",
+  "team-reports": "team_reports.submit",
+  "team-settings": "team_kpi.manage",
+  "role-permissions": "role_permissions.manage",
+};
+function canWithProfile(profile, action, resource) {
+  if (!profile) return false;
+  if (action === "view") return profile.tabs?.includes(resource) || false;
+  const ability =
+    resource === "feedback" && action === "update-action"
+      ? "feedback.update_action"
+      : ACTION_ABILITY[resource];
+  return Boolean(ability && profile.abilities?.includes(ability));
+}
+export function canRole(role, action, resource, profiles = []) {
+  const profile = Array.isArray(profiles)
+    ? profiles.find((item) => item.role === role)
+    : profiles?.role === role
+      ? profiles
+      : null;
+  return canWithProfile(profile, action, resource);
 }
 const accessDenied = () => {
   throw new Error("Role Anda tidak memiliki izin untuk tindakan ini.");
@@ -4536,6 +4545,7 @@ function OpsProvider({
   serverUsers = [],
   serverOperations = {},
   serverTeam,
+  serverPermissions = { current: null, roles: [] },
   flash = {},
 }) {
   const incomingData = () => ({
@@ -4556,7 +4566,9 @@ function OpsProvider({
   const [notice, setNotice] = useState(flash.success || "");
   const currentUser = authUser ? { ...authUser, active: true } : null;
   const can = (action, resource) =>
-    currentUser ? canRole(currentUser.role, action, resource) : false;
+    currentUser
+      ? canRole(currentUser.role, action, resource, serverPermissions.current)
+      : false;
 
   useEffect(() => {
     const next = incomingData();
@@ -4660,11 +4672,13 @@ function OpsProvider({
 
   async function teamDispatch(command) {
     if (command.type === "save") {
+      if (!can("submit", "team-reports")) accessDenied();
       await inertiaMutation("/team-reports", "post", command.report);
       setNotice("Team Performance KPI diperbarui.");
       return;
     }
     if (command.type === "save-definition") {
+      if (!can("manage", "team-settings")) accessDenied();
       const definition = command.definition;
       const exists = dataRef.current.team.definitions.some(
         (item) => item.id === definition.id,
@@ -4679,15 +4693,26 @@ function OpsProvider({
       setNotice("Pengaturan KPI diperbarui.");
       return;
     }
-    if (command.type === "toggle-definition") {
+    if (command.type === "delete-definition") {
+      if (!can("manage", "team-settings")) accessDenied();
       await inertiaMutation(
-        `/team-kpi-definitions/${command.definitionId}/toggle`,
-        "patch",
+        `/team-kpi-definitions/${command.definitionId}`,
+        "delete",
       );
-      setNotice("Status KPI diperbarui.");
+      setNotice("KPI berhasil dihapus. Riwayat lama tetap utuh.");
       return;
     }
     throw new Error("Tindakan Team Performance tidak tersedia.");
+  }
+
+  async function saveRolePermissions(profile) {
+    if (!can("manage", "role-permissions")) accessDenied();
+    await inertiaMutation(`/role-permissions/${profile.role}`, "put", {
+      tabs: profile.tabs,
+      abilities: profile.abilities,
+      reportRoles: profile.reportRoles,
+    });
+    setNotice(`Permission ${PIC[profile.role].name} berhasil diperbarui.`);
   }
 
   useEffect(() => {
@@ -4713,20 +4738,15 @@ function OpsProvider({
         return {
           role: PIC[currentUser.role].name,
           visibleTabs: TAB_META.filter((tab) =>
-            canRole(currentUser.role, "view", tab.id),
+            can("view", tab.id),
           ).map((tab) => tab.label),
-          canManageAll: FULL_ACCESS_ROLES.has(currentUser.role),
-          canManageKpi: canRole(currentUser.role, "update", "cycles"),
-          canUpdateFeedbackAction: canRole(
-            currentUser.role,
-            "update-action",
-            "feedback",
-          ),
+          abilities: serverPermissions.current?.abilities || [],
+          readableReportRoles: serverPermissions.current?.reportRoles || [],
         };
       },
     });
     return () => lifecycle.abort();
-  }, [currentUser?.id, currentUser?.role]);
+  }, [currentUser?.id, currentUser?.role, serverPermissions.current]);
 
   const clients = deliveryClients(data);
   const value = {
@@ -4748,6 +4768,8 @@ function OpsProvider({
     cyclesFor: (id) => cyclesFor(id, data.cycles),
     computeFlag: (id) => computeFlag(id, data.cycles),
     currentUser,
+    permissionProfile: serverPermissions.current,
+    rolePermissions: serverPermissions.roles || [],
     can,
     login,
     logout,
@@ -4768,6 +4790,7 @@ function OpsProvider({
     saveFeedbackAction,
     remove,
     moveTask,
+    saveRolePermissions,
   };
   return <OpsContext.Provider value={value}>{children}</OpsContext.Provider>;
 }
@@ -5549,8 +5572,143 @@ function ClientManager() {
     </section>
   );
 }
+function RolePermissionEditor({ profile, onClose, onSave }) {
+  const [draft, setDraft] = useState(() => clone(profile));
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const toggle = (key, id) =>
+    setDraft((current) => ({
+      ...current,
+      [key]: current[key].includes(id)
+        ? current[key].filter((item) => item !== id)
+        : [...current[key], id],
+    }));
+
+  async function submit() {
+    if (!draft.tabs.length) {
+      setError("Pilih minimal satu tab yang dapat dibuka.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(draft);
+      onClose();
+    } catch (caught) {
+      setError(caught.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={`Permission ${PIC[draft.role].name}`}
+      onClose={saving ? () => {} : onClose}
+    >
+      <p className="mb-5 text-sm leading-6 text-zinc-400">
+        Atur tab, tindakan, dan cakupan rekap Team Performance untuk seluruh user
+        dengan role ini.
+      </p>
+      {error && (
+        <p className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">
+          {error}
+        </p>
+      )}
+      <div className="space-y-6">
+        <fieldset>
+          <legend className="mb-3 text-sm font-semibold text-zinc-100">
+            Tab yang dapat dibuka
+          </legend>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {TAB_META.map((tab) => (
+              <label
+                key={tab.id}
+                className="ops-inline-label rounded-lg border border-zinc-800 bg-zinc-900 p-3 text-sm"
+              >
+                <input
+                  type="checkbox"
+                  checked={draft.tabs.includes(tab.id)}
+                  onChange={() => toggle("tabs", tab.id)}
+                />
+                {tab.label}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend className="mb-3 text-sm font-semibold text-zinc-100">
+            Otoritas
+          </legend>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {ABILITY_META.map((ability) => (
+              <label
+                key={ability.id}
+                className="ops-inline-label rounded-lg border border-zinc-800 bg-zinc-900 p-3 text-sm"
+              >
+                <input
+                  type="checkbox"
+                  checked={draft.abilities.includes(ability.id)}
+                  onChange={() => toggle("abilities", ability.id)}
+                />
+                {ability.label}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend className="mb-1 text-sm font-semibold text-zinc-100">
+            Rekap KPI tim yang dapat dilihat
+          </legend>
+          <p className="mb-3 text-xs text-zinc-500">
+            Laporan milik sendiri selalu dapat dilihat.
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {ROLE_IDS.map((role) => (
+              <label
+                key={role}
+                className="ops-inline-label rounded-lg border border-zinc-800 bg-zinc-900 p-3 text-sm"
+              >
+                <input
+                  type="checkbox"
+                  checked={draft.reportRoles.includes(role)}
+                  disabled={role === draft.role}
+                  onChange={() => toggle("reportRoles", role)}
+                />
+                {PIC[role].name}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      </div>
+      <div className="mt-6 flex justify-end gap-2">
+        <button className="ops-button" disabled={saving} onClick={onClose}>
+          Batal
+        </button>
+        <button
+          className="ops-button ops-primary"
+          disabled={saving}
+          onClick={submit}
+        >
+          {saving ? "Menyimpan..." : "Simpan permission"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 function UserManager() {
-  const { data, currentUser, openEditor, askDelete } = useOps();
+  const {
+    data,
+    currentUser,
+    can,
+    rolePermissions,
+    saveRolePermissions,
+    openEditor,
+    askDelete,
+  } = useOps();
+  const [editingPermission, setEditingPermission] = useState(null);
+  const canManageUsers = can("update", "users");
+  const canManagePermissions = can("manage", "role-permissions");
   return (
     <section>
       <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
@@ -5564,12 +5722,14 @@ function UserManager() {
             nama pribadi.
           </p>
         </div>
-        <button
-          className="ops-button ops-primary"
-          onClick={() => openEditor("users")}
-        >
-          + Tambah user
-        </button>
+        {canManageUsers && (
+          <button
+            className="ops-button ops-primary"
+            onClick={() => openEditor("users")}
+          >
+            + Tambah user
+          </button>
+        )}
       </header>
       <div className="overflow-x-auto rounded-xl border border-zinc-800">
         <table className="w-full text-left text-sm">
@@ -5600,20 +5760,24 @@ function UserManager() {
                 </td>
                 <td className="p-4">{u.active ? "Aktif" : "Nonaktif"}</td>
                 <td className="p-4">
-                  <div className="flex gap-2">
-                    <button
-                      className="ops-button"
-                      onClick={() => openEditor("users", u)}
-                    >
-                      Edit role / akun
-                    </button>
-                    <button
-                      className="ops-button ops-danger"
-                      onClick={() => askDelete("users", u)}
-                    >
-                      Hapus
-                    </button>
-                  </div>
+                  {canManageUsers ? (
+                    <div className="flex gap-2">
+                      <button
+                        className="ops-button"
+                        onClick={() => openEditor("users", u)}
+                      >
+                        Edit role / akun
+                      </button>
+                      <button
+                        className="ops-button ops-danger"
+                        onClick={() => askDelete("users", u)}
+                      >
+                        Hapus
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="text-zinc-500">Lihat saja</span>
+                  )}
                 </td>
               </tr>
             ))}
@@ -5624,40 +5788,74 @@ function UserManager() {
         Minimal satu COO aktif. Setiap akun memakai email dan password Laravel;
         akses halaman dan tindakan mengikuti role yang dipilih.
       </p>
-      <div className="mt-6 overflow-x-auto rounded-xl border border-zinc-800">
+      {canManagePermissions && (
+        <div className="mt-8 mb-4 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-semibold">Permission per role</h2>
+            <p className="mt-1 text-sm text-zinc-400">
+              Perubahan langsung berlaku untuk seluruh user dengan role terkait.
+            </p>
+          </div>
+        </div>
+      )}
+      {canManagePermissions && (
+        <div className="overflow-x-auto rounded-xl border border-zinc-800">
         <table className="w-full min-w-[760px] text-left text-sm">
           <thead className="bg-zinc-900 text-zinc-400">
             <tr>
               <th className="p-4">Role</th>
               <th className="p-4">Tab</th>
               <th className="p-4">Hak perubahan</th>
+              <th className="p-4">Cakupan rekap KPI</th>
+              <th className="p-4">Aksi</th>
             </tr>
           </thead>
           <tbody>
-            {ROLE_IDS.map((role) => (
-              <tr key={role} className="border-t border-zinc-800">
+            {rolePermissions.map((profile) => (
+              <tr key={profile.role} className="border-t border-zinc-800">
                 <td className="p-4 font-medium text-zinc-100">
-                  {PIC[role].name}
+                  {PIC[profile.role].name}
                 </td>
                 <td className="p-4 text-zinc-400">
-                  {TAB_META.filter((tab) => canRole(role, "view", tab.id))
+                  {TAB_META.filter((tab) => profile.tabs.includes(tab.id))
                     .map((tab) => tab.label)
+                    .join(", ") || "Tidak ada"}
+                </td>
+                <td className="p-4 text-zinc-400">
+                  {ABILITY_META.filter((item) =>
+                    profile.abilities.includes(item.id),
+                  )
+                    .map((item) => item.label)
+                    .join(", ") || "Lihat saja"}
+                </td>
+                <td className="p-4 text-zinc-400">
+                  {profile.reportRoles
+                    .map((role) => PIC[role]?.name)
+                    .filter(Boolean)
                     .join(", ")}
                 </td>
-                <td className="p-4 text-zinc-400">
-                  {FULL_ACCESS_ROLES.has(role)
-                    ? "CRUD semua data"
-                    : role === "digital-marketer"
-                      ? "CRUD KPI; edit tindak lanjut feedback"
-                      : ["developer", "creative"].includes(role)
-                        ? "Edit tindak lanjut feedback"
-                        : "Read-only"}
+                <td className="p-4">
+                  <button
+                    className="ops-button"
+                    onClick={() => setEditingPermission(profile)}
+                  >
+                    Edit permission
+                  </button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      )}
+      {editingPermission && (
+        <RolePermissionEditor
+          key={editingPermission.role}
+          profile={editingPermission}
+          onClose={() => setEditingPermission(null)}
+          onSave={saveRolePermissions}
+        />
+      )}
     </section>
   );
 }
@@ -5759,15 +5957,26 @@ function Login() {
 /* -------------------------- app shell -------------------------- */
 
 function AppShell() {
-  const { currentUser, logout, storageError, notice, can, data, teamDispatch } =
-    useOps();
+  const {
+    currentUser,
+    permissionProfile,
+    logout,
+    storageError,
+    notice,
+    can,
+    data,
+    teamDispatch,
+  } = useOps();
   const [tab, setTab] = useState("board");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [highlightClient, setHighlightClient] = useState(null);
 
   useEffect(() => {
-    if (currentUser && !canRole(currentUser.role, "view", tab)) setTab("board");
-  }, [currentUser?.role, tab]);
+    if (currentUser && !can("view", tab)) {
+      const fallback = TAB_META.find((item) => can("view", item.id));
+      if (fallback) setTab(fallback.id);
+    }
+  }, [currentUser?.role, permissionProfile, tab]);
 
   if (!currentUser) return <Login />;
 
@@ -5975,6 +6184,9 @@ function AppShell() {
             team={data.team}
             users={data.users}
             currentUser={currentUser}
+            reportRoles={permissionProfile?.reportRoles || [currentUser.role]}
+            canSubmit={can("submit", "team-reports")}
+            canManageSettings={can("manage", "team-settings")}
             dispatch={teamDispatch}
           />
         )}
@@ -5987,13 +6199,14 @@ function AppShell() {
   );
 }
 
-const PROTOTYPE_CSS =
+const APP_CSS =
   ".pbm-prototype { color-scheme: dark; font-family: Inter, system-ui, sans-serif; background: #09090b; }\nbutton,select { cursor:pointer; }\nbutton:disabled { cursor:not-allowed; opacity:.45; }\ninput,select,textarea { color-scheme:dark; }\nbutton:focus-visible,a:focus-visible { outline:2px solid #a78bfa; outline-offset:3px; }\n.ops-dialog::backdrop { background:rgb(0 0 0 / .76); backdrop-filter:blur(4px); }\n.ops-dialog { margin:auto; max-height:90dvh; width:min(850px,calc(100% - 24px)); overflow:auto; border:1px solid #3f3f46; border-radius:20px; padding:24px; background:#09090b; color:#f4f4f5; }\n.ops-dialog input:not([type=radio]):not([type=checkbox]),.ops-dialog select,.ops-dialog textarea,.login-input { width:100%; background:#18181b; border:1px solid #3f3f46; border-radius:8px; padding:10px 12px; color:#f4f4f5; }\n.ops-dialog label { display:grid; gap:7px; font-size:14px; color:#d4d4d8; }\n.ops-dialog textarea { min-height:88px; resize:vertical; }\n.ops-button { display:inline-flex; align-items:center; justify-content:center; gap:6px; border:1px solid #3f3f46; border-radius:8px; padding:8px 12px; font-size:14px; background:#18181b; color:#e4e4e7; }\n.ops-button:hover { background:#27272a; }\n.ops-primary { background:#4f39f6; border-color:#4f39f6; color:white; }\n.ops-primary:hover { background:#634efb; }\n.ops-danger { color:#fda4af; border-color:#9f1239; }\n.ops-empty { padding:32px; border:1px dashed #3f3f46; border-radius:12px; color:#a1a1aa; text-align:center; }\n@media(max-width:640px) { main { padding:20px 12px !important; } .ops-dialog { padding:18px; } }\n.ops-dialog label.ops-inline-label { display:flex; align-items:center; gap:8px; }\n";
 export default function App({
   authUser,
   serverUsers,
   serverOperations,
   serverTeam,
+  serverPermissions,
   flash,
 }) {
   return (
@@ -6002,9 +6215,10 @@ export default function App({
       serverUsers={serverUsers}
       serverOperations={serverOperations}
       serverTeam={serverTeam}
+      serverPermissions={serverPermissions}
       flash={flash}
     >
-      <style>{PROTOTYPE_CSS}</style>
+      <style>{APP_CSS}</style>
       <AppShell />
     </OpsProvider>
   );

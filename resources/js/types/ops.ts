@@ -32,11 +32,24 @@ export interface TeamPayload {
   reports: unknown[];
 }
 
+export interface RolePermissionProfile {
+  role: RoleId;
+  tabs: string[];
+  abilities: string[];
+  reportRoles: RoleId[];
+}
+
+export interface PermissionsPayload {
+  current: RolePermissionProfile | null;
+  roles: RolePermissionProfile[];
+}
+
 export interface PbmOpsPageProps {
   [key: string]: unknown;
   auth: { user: AuthUser | null };
   users: OpsUser[];
   operations: OperationsPayload;
   team: TeamPayload;
+  permissions: PermissionsPayload;
   flash: { success?: string };
 }
