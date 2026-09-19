@@ -31,6 +31,8 @@ class OperationalCrudTest extends TestCase
         $this->actingAs($coo)->post('/tasks', $this->taskPayload($client->id))->assertRedirect();
         $task = Task::where('name', 'Database Task')->firstOrFail();
         $this->assertDatabaseHas('task_status_events', ['task_id' => $task->id, 'to_status' => 'intake']);
+        $this->assertDatabaseHas('task_assignees', ['task_id' => $task->id, 'role' => 'developer']);
+        $this->assertDatabaseHas('task_assignees', ['task_id' => $task->id, 'role' => 'creative']);
 
         $this->actingAs($coo)->patch("/tasks/{$task->id}/status", ['status' => 'done'])->assertRedirect();
         $task->refresh();
@@ -96,10 +98,35 @@ class OperationalCrudTest extends TestCase
         }
     }
 
+    public function test_quick_task_uses_short_workflow_and_multiple_assignees(): void
+    {
+        $coo = User::where('email', 'coo@gmail.com')->firstOrFail();
+        $client = Client::create(['id' => 'quick-client', 'name' => 'Quick Client', 'contract' => 'Retainer', 'bottleneck' => '']);
+
+        $payload = $this->taskPayload($client->id, 'Quick performance fix');
+        $payload['workflow'] = 'quick';
+        $payload['status'] = 'in-progress';
+        $this->actingAs($coo)->post('/tasks', $payload)->assertRedirect();
+
+        $task = Task::where('name', 'Quick performance fix')->firstOrFail();
+        $this->assertSame('quick', $task->workflow);
+        $this->assertCount(2, $task->assignees);
+
+        $this->actingAs($coo)
+            ->patch("/tasks/{$task->id}/status", ['status' => 'validation'])
+            ->assertRedirect();
+        $this->assertDatabaseHas('tasks', ['id' => $task->id, 'status' => 'validation']);
+
+        $this->actingAs($coo)
+            ->patch("/tasks/{$task->id}/status", ['status' => 'strategy'])
+            ->assertSessionHasErrors('status');
+    }
+
     private function taskPayload(string $client, string $name = 'Database Task'): array
     {
         return [
-            'client' => $client, 'name' => $name, 'status' => 'intake', 'pic' => 'developer',
+            'client' => $client, 'name' => $name, 'workflow' => 'standard', 'status' => 'intake',
+            'pics' => ['developer', 'creative'],
             'due' => '2026-09-20', 'cycle' => 1, 'revision' => 0, 'priority' => 'normal',
             'type' => 'feature', 'brief' => 'Persisted task', 'blocked' => false,
         ];

@@ -76,7 +76,7 @@ function pillStyle(color) {
 
 /* -------------------------- data model: delivery -------------------------- */
 
-const STATUSES = [
+const STANDARD_STATUSES = [
   {
     id: "intake",
     label: "Intake & Backlog",
@@ -116,7 +116,47 @@ const STATUSES = [
   },
   { id: "done", label: "Live & Done", short: "Done", color: "#52525b" },
 ];
-const STATUS_BY_ID = Object.fromEntries(STATUSES.map((s) => [s.id, s]));
+const QUICK_STATUSES = [
+  { id: "intake", label: "Intake", short: "Intake", color: "#71717a" },
+  {
+    id: "in-progress",
+    label: "In Progress",
+    short: "In Progress",
+    color: COLOR.sky,
+  },
+  {
+    id: "validation",
+    label: "Validation",
+    short: "Validation",
+    color: COLOR.amber,
+  },
+  { id: "done", label: "Done", short: "Done", color: COLOR.emerald },
+];
+const STATUSES = STANDARD_STATUSES;
+const ALL_STATUSES = [
+  ...STANDARD_STATUSES,
+  ...QUICK_STATUSES.filter(
+    (quick) => !STANDARD_STATUSES.some((standard) => standard.id === quick.id),
+  ),
+];
+const STATUS_BY_ID = Object.fromEntries(ALL_STATUSES.map((s) => [s.id, s]));
+const WORKFLOW_META = {
+  standard: {
+    label: "Standard Delivery",
+    description: "Workflow build dan optimize lengkap",
+  },
+  quick: {
+    label: "Quick Task",
+    description: "Revisi kecil dan pekerjaan teknis singkat",
+  },
+};
+const statusesForWorkflow = (workflow) =>
+  workflow === "quick" ? QUICK_STATUSES : STANDARD_STATUSES;
+const taskPics = (task) => {
+  const roles = Array.isArray(task?.pics) ? task.pics : [task?.pic];
+  return [...new Set(roles.filter((role) => PIC[role]))];
+};
+const taskHasPic = (task, role) => !role || taskPics(task).includes(role);
 
 const PIC = {
   coo: {
@@ -1253,7 +1293,7 @@ function PriorityTag({ priority }) {
 }
 
 function PicChip({ id }) {
-  const p = PIC[id];
+  const p = PIC[id] || PIC["project-manager"];
   return (
     <span
       className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full font-semibold text-zinc-950"
@@ -1262,6 +1302,26 @@ function PicChip({ id }) {
     >
       {p.initials}
     </span>
+  );
+}
+
+function PicGroup({ task, showNames = false }) {
+  const roles = taskPics(task);
+  return (
+    <div className="flex min-w-0 items-center gap-1.5">
+      <div className="flex shrink-0 -space-x-1">
+        {roles.map((role) => (
+          <span key={role} className="rounded-full ring-2 ring-zinc-900">
+            <PicChip id={role} />
+          </span>
+        ))}
+      </div>
+      {showNames && (
+        <span className="truncate text-zinc-400" style={{ fontSize: 11 }}>
+          {roles.map((role) => PIC[role].name).join(", ")}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -1498,7 +1558,6 @@ function TaskCard({ task, dimmed, onClick }) {
   const overdue = isOverdue(task);
   const urgency = urgencyColor(task);
   const urgent = task.priority === "urgent";
-  const pic = PIC[task.pic];
   return (
     <button
       data-card-size="full"
@@ -1526,6 +1585,15 @@ function TaskCard({ task, dimmed, onClick }) {
         >
           <Flag className="h-3 w-3" />
           Urgent
+        </span>
+      )}
+      {task.workflow === "quick" && (
+        <span
+          className="mb-2 ml-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-bold uppercase tracking-wider"
+          style={{ ...pillStyle(COLOR.sky), fontSize: 10 }}
+        >
+          <Zap className="h-3 w-3" />
+          Quick
         </span>
       )}
       <div className="flex items-start justify-between gap-2">
@@ -1564,10 +1632,7 @@ function TaskCard({ task, dimmed, onClick }) {
       </div>
 
       <div className="mt-2.5 flex items-center gap-1.5 border-t border-zinc-800 pt-2">
-        <PicChip id={task.pic} />
-        <span className="text-zinc-400" style={{ fontSize: 11 }}>
-          {pic.name}
-        </span>
+        <PicGroup task={task} showNames />
       </div>
     </button>
   );
@@ -1597,7 +1662,12 @@ function CompactTaskRow({ task, dimmed, onClick }) {
         ...(urgent ? { borderLeftWidth: 3, borderLeftColor: COLOR.rose } : {}),
       }}
     >
-      <PicChip id={task.pic} />
+      <PicGroup task={task} />
+      {task.workflow === "quick" && (
+        <span className="shrink-0 text-sky-300" style={{ fontSize: 9 }}>
+          QUICK
+        </span>
+      )}
       {task.type === "hotfix" && (
         <Zap className="h-3 w-3 shrink-0" style={{ color: COLOR.rose }} />
       )}
@@ -1639,14 +1709,14 @@ function TaskCell({ tasks, dimmedPic, onOpenTask }) {
           <CompactTaskRow
             key={t.id}
             task={t}
-            dimmed={Boolean(dimmedPic) && t.pic !== dimmedPic}
+            dimmed={Boolean(dimmedPic) && !taskHasPic(t, dimmedPic)}
             onClick={() => onOpenTask(t)}
           />
         ) : (
           <TaskCard
             key={t.id}
             task={t}
-            dimmed={Boolean(dimmedPic) && t.pic !== dimmedPic}
+            dimmed={Boolean(dimmedPic) && !taskHasPic(t, dimmedPic)}
             onClick={() => onOpenTask(t)}
           />
         ),
@@ -1804,9 +1874,14 @@ function TaskDetailModal({ task, onClose }) {
   return (
     <Modal title={task.name} onClose={onClose}>
       <p className="mb-5 text-sm text-zinc-400">
-        {getClient(task.client).name} · {PIC[task.pic].name} ·{" "}
-        {formatDate(task.due)}
+        {getClient(task.client).name} · {WORKFLOW_META[task.workflow || "standard"].label} · {formatDate(task.due)}
       </p>
+      <div className="mb-5 rounded-lg border border-zinc-800 bg-zinc-900 p-3">
+        <p className="mb-2 text-xs uppercase tracking-wide text-zinc-500">
+          PIC / pihak terlibat
+        </p>
+        <PicGroup task={task} showNames />
+      </div>
       {can("update", "tasks") ? (
         <label>
           Status task
@@ -1814,7 +1889,7 @@ function TaskDetailModal({ task, onClose }) {
             value={task.status}
             onChange={(e) => moveTask(task.id, e.target.value)}
           >
-            {STATUSES.map((s) => (
+            {statusesForWorkflow(task.workflow).map((s) => (
               <option key={s.id} value={s.id}>
                 {s.label}
               </option>
@@ -1825,6 +1900,12 @@ function TaskDetailModal({ task, onClose }) {
         <DetailField label="Status" value={STATUS_BY_ID[task.status].label} />
       )}
       <div className="my-5 flex flex-wrap gap-2">
+        <span
+          className="rounded-full px-2 py-0.5 text-xs font-medium"
+          style={pillStyle(task.workflow === "quick" ? COLOR.sky : ACCENT)}
+        >
+          {WORKFLOW_META[task.workflow || "standard"].label}
+        </span>
         <CycleTag cycle={task.cycle} />
         <RevisionBadge revision={task.revision} />
         <PriorityTag priority={task.priority} />
@@ -1879,7 +1960,7 @@ function getMonthMatrix(year, monthIndex) {
   return weeks;
 }
 
-function CalendarView({ activePic, onOpenTask }) {
+function CalendarView({ activePic, workflowFilter, onOpenTask }) {
   const { TASKS, CLIENT_COLOR } = useOps();
   const [cursor, setCursor] = useState(
     new Date(new Date().getFullYear(), new Date().getMonth(), 1),
@@ -1896,7 +1977,12 @@ function CalendarView({ activePic, onOpenTask }) {
   function tasksOnDay(day) {
     if (!day) return [];
     const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-    return TASKS.filter((t) => t.due === iso);
+    return TASKS.filter(
+      (t) =>
+        t.due === iso &&
+        (workflowFilter === "all" ||
+          (t.workflow || "standard") === workflowFilter),
+    );
   }
 
   return (
@@ -1960,8 +2046,13 @@ function CalendarView({ activePic, onOpenTask }) {
 
       <p className="mb-3 text-sm text-zinc-400">
         {
-          TASKS.filter((t) =>
-            t.due.startsWith(`${year}-${String(month + 1).padStart(2, "0")}`),
+          TASKS.filter(
+            (t) =>
+              t.due.startsWith(
+                `${year}-${String(month + 1).padStart(2, "0")}`,
+              ) &&
+              (workflowFilter === "all" ||
+                (t.workflow || "standard") === workflowFilter),
           ).length
         }{" "}
         task bulan ini · tanggal mengikuti deadline. Pilih bulan lain untuk
@@ -2017,7 +2108,7 @@ function CalendarView({ activePic, onOpenTask }) {
                         <div className="mt-1 space-y-1">
                           {dayTasks.map((t) => {
                             const dimmed =
-                              Boolean(activePic) && t.pic !== activePic;
+                              Boolean(activePic) && !taskHasPic(t, activePic);
                             const c = CLIENT_COLOR[t.client] || ACCENT;
                             return (
                               <button
@@ -2052,12 +2143,151 @@ function CalendarView({ activePic, onOpenTask }) {
   );
 }
 
+function WorkflowBoardGrid({
+  title,
+  description,
+  tasks,
+  statuses,
+  clients,
+  activePic,
+  pulseId,
+  rowRefs,
+  onOpenTask,
+  onMoveTask,
+  canMove,
+}) {
+  const gridTemplate = `210px repeat(${statuses.length}, minmax(190px, 1fr))`;
+  const visibleClients = clients.filter((client) =>
+    tasks.some((task) => task.client === client.id),
+  );
+  const statusCounts = Object.fromEntries(
+    statuses.map((status) => [
+      status.id,
+      tasks.filter((task) => task.status === status.id).length,
+    ]),
+  );
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <h2 className="text-base font-semibold text-zinc-100">{title}</h2>
+        <p className="mt-1 text-sm text-zinc-500">{description}</p>
+      </div>
+      {!visibleClients.length ? (
+        <p className="ops-empty">Belum ada task pada workflow ini.</p>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-zinc-800">
+          <div style={{ minWidth: 210 + statuses.length * 190 }}>
+            <div className="grid" style={{ gridTemplateColumns: gridTemplate }}>
+              <div className="sticky left-0 z-10 border-b border-r border-zinc-800 bg-zinc-950 p-3 text-xs font-medium uppercase tracking-wide text-zinc-500">
+                Client
+              </div>
+              {statuses.map((status) => (
+                <div key={status.id} className="border-b border-zinc-800 p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                      {status.short}
+                    </span>
+                    <span className="text-xs tabular-nums text-zinc-600">
+                      {statusCounts[status.id]}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {visibleClients.map((client) => {
+              const clientTasks = tasks.filter(
+                (task) => task.client === client.id,
+              );
+              const openCount = clientTasks.filter(
+                (task) => task.status !== "done",
+              ).length;
+              const overdueCount = clientTasks.filter(isOverdue).length;
+              return (
+                <div
+                  key={client.id}
+                  ref={(element) => {
+                    if (rowRefs) rowRefs.current[client.id] = element;
+                  }}
+                  className="grid transition-colors"
+                  style={{
+                    gridTemplateColumns: gridTemplate,
+                    ...(pulseId === client.id
+                      ? {
+                          boxShadow: `inset 0 0 0 1px ${ACCENT}`,
+                          backgroundColor: rgba(ACCENT, 0.07),
+                        }
+                      : {}),
+                  }}
+                >
+                  <div className="sticky left-0 z-10 flex flex-col justify-center gap-1.5 border-b border-r border-zinc-800 bg-zinc-950 p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium text-zinc-100">
+                        {client.name}
+                      </span>
+                      <HealthBadge health={client.health} />
+                    </div>
+                    <ClientProgressBar clientId={client.id} />
+                    <span className="text-zinc-500" style={{ fontSize: 11 }}>
+                      {openCount} open
+                      {overdueCount > 0 && (
+                        <span style={{ color: COLOR.rose }}>
+                          {" "}· {overdueCount} overdue
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  {statuses.map((status) => {
+                    const cellTasks = clientTasks.filter(
+                      (task) => task.status === status.id,
+                    );
+                    return (
+                      <div
+                        key={status.id}
+                        onDragOver={(event) => {
+                          if (!canMove) return;
+                          event.preventDefault();
+                          event.dataTransfer.dropEffect = "move";
+                        }}
+                        onDrop={(event) => {
+                          if (!canMove) return;
+                          event.preventDefault();
+                          const task = tasks.find(
+                            (item) =>
+                              String(item.id) ===
+                              event.dataTransfer.getData("text/plain"),
+                          );
+                          if (task && task.client === client.id)
+                            onMoveTask(task.id, status.id);
+                        }}
+                        className="border-b border-l border-zinc-900 p-2"
+                        style={{ minHeight: 100 }}
+                      >
+                        <TaskCell
+                          tasks={cellTasks}
+                          dimmedPic={activePic}
+                          onOpenTask={onOpenTask}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* -------------------------- Monthly Execution Board -------------------------- */
 
 function ExecutionBoard({ highlightClient, onHighlightHandled }) {
   const { CLIENTS, TASKS, openEditor, moveTask, can } = useOps();
   const [viewMode, setViewMode] = useState("kanban");
   const [activePic, setActivePic] = useState(null);
+  const [workflowFilter, setWorkflowFilter] = useState("all");
   const [doneWindow, setDoneWindow] = useState("weekly");
   const [pulseId, setPulseId] = useState(null);
   const [selectedTask, setSelectedTask] = useState(null);
@@ -2082,19 +2312,13 @@ function ExecutionBoard({ highlightClient, onHighlightHandled }) {
   }, [highlightClient]);
 
   const boardTasks = TASKS.filter((task) => doneTaskVisible(task, doneWindow));
+  const standardTasks = boardTasks.filter(
+    (task) => (task.workflow || "standard") === "standard",
+  );
+  const quickTasks = boardTasks.filter((task) => task.workflow === "quick");
   const hiddenDoneCount = TASKS.filter(
     (task) => task.status === "done" && !doneTaskVisible(task, doneWindow),
   ).length;
-  const statusCounts = derive(() => {
-    const m = {};
-    STATUSES.forEach((s) => {
-      m[s.id] = boardTasks.filter((t) => t.status === s.id).length;
-    });
-    return m;
-  }, []);
-
-  const gridTemplate = `210px repeat(${STATUSES.length}, minmax(190px, 1fr))`;
-
   return (
     <section className="space-y-5">
       <PageHeader
@@ -2148,117 +2372,62 @@ function ExecutionBoard({ highlightClient, onHighlightHandled }) {
         </p>
       )}
       <HotfixBanner tasks={TASKS} onOpenTask={setSelectedTask} />
-      <PicFilterSelect activePic={activePic} onChange={setActivePic} />
+      <div className="flex flex-wrap items-center gap-4">
+        <PicFilterSelect activePic={activePic} onChange={setActivePic} />
+        <label className="mb-4 flex max-w-xs items-center gap-3 text-sm text-zinc-400">
+          <span className="shrink-0">Workflow</span>
+          <select
+            className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-zinc-200 focus:border-violet-500 focus:outline-none"
+            aria-label="Filter workflow execution board"
+            value={workflowFilter}
+            onChange={(event) => setWorkflowFilter(event.target.value)}
+          >
+            <option value="all">Semua workflow</option>
+            <option value="standard">Standard Delivery</option>
+            <option value="quick">Quick Task</option>
+          </select>
+        </label>
+      </div>
 
       {viewMode === "kanban" ? (
-        <div className="overflow-x-auto rounded-xl border border-zinc-800">
-          <div style={{ minWidth: 1820 }}>
-            <div className="grid" style={{ gridTemplateColumns: gridTemplate }}>
-              <div className="sticky left-0 z-10 border-b border-r border-zinc-800 bg-zinc-950 p-3 text-xs font-medium uppercase tracking-wide text-zinc-500">
-                Client
-              </div>
-              {STATUSES.map((s) => (
-                <div key={s.id} className="border-b border-zinc-800 p-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium uppercase tracking-wide text-zinc-400">
-                      {s.short}
-                    </span>
-                    <span
-                      className="tabular-nums text-zinc-600"
-                      style={{ fontSize: 11 }}
-                    >
-                      {statusCounts[s.id]}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {CLIENTS.map((client) => {
-              const clientTasks = boardTasks.filter(
-                (t) => t.client === client.id,
-              );
-              const openCount = clientTasks.filter(
-                (t) => t.status !== "done",
-              ).length;
-              const overdueCount = clientTasks.filter(isOverdue).length;
-              const pulsing = pulseId === client.id;
-              return (
-                <div
-                  key={client.id}
-                  ref={(el) => {
-                    rowRefs.current[client.id] = el;
-                  }}
-                  className="grid transition-colors"
-                  style={{
-                    gridTemplateColumns: gridTemplate,
-                    ...(pulsing
-                      ? {
-                          boxShadow: `inset 0 0 0 1px ${ACCENT}`,
-                          backgroundColor: rgba(ACCENT, 0.07),
-                        }
-                      : {}),
-                  }}
-                >
-                  <div className="sticky left-0 z-10 flex flex-col justify-center gap-1.5 border-b border-r border-zinc-800 bg-zinc-950 p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-medium text-zinc-100">
-                        {client.name}
-                      </span>
-                      <HealthBadge health={client.health} />
-                    </div>
-                    <ClientProgressBar clientId={client.id} />
-                    <span className="text-zinc-500" style={{ fontSize: 11 }}>
-                      {openCount} open
-                      {overdueCount > 0 && (
-                        <span style={{ color: COLOR.rose }}>
-                          {" "}
-                          · {overdueCount} overdue
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                  {STATUSES.map((s) => {
-                    const cellTasks = clientTasks.filter(
-                      (t) => t.status === s.id,
-                    );
-                    return (
-                      <div
-                        key={s.id}
-                        onDragOver={(e) => {
-                          if (!can("update", "tasks")) return;
-                          e.preventDefault();
-                          e.dataTransfer.dropEffect = "move";
-                        }}
-                        onDrop={(e) => {
-                          if (!can("update", "tasks")) return;
-                          e.preventDefault();
-                          const task = TASKS.find(
-                            (t) =>
-                              String(t.id) ===
-                              e.dataTransfer.getData("text/plain"),
-                          );
-                          if (task && task.client === client.id)
-                            moveTask(task.id, s.id);
-                        }}
-                        className="border-b border-l border-zinc-900 p-2"
-                        style={{ minHeight: 100 }}
-                      >
-                        <TaskCell
-                          tasks={cellTasks}
-                          dimmedPic={activePic}
-                          onOpenTask={setSelectedTask}
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })}
-          </div>
+        <div className="space-y-7">
+          {workflowFilter !== "standard" && (
+            <WorkflowBoardGrid
+              title="Quick Task"
+              description="Jalur singkat untuk revisi kecil dan pekerjaan teknis: Intake → In Progress → Validation → Done."
+              tasks={quickTasks}
+              statuses={QUICK_STATUSES}
+              clients={CLIENTS}
+              activePic={activePic}
+              pulseId={pulseId}
+              rowRefs={rowRefs}
+              onOpenTask={setSelectedTask}
+              onMoveTask={moveTask}
+              canMove={can("update", "tasks")}
+            />
+          )}
+          {workflowFilter !== "quick" && (
+            <WorkflowBoardGrid
+              title="Standard Delivery"
+              description="Workflow lengkap untuk pekerjaan build dan optimize lintas tahap."
+              tasks={standardTasks}
+              statuses={STANDARD_STATUSES}
+              clients={CLIENTS}
+              activePic={activePic}
+              pulseId={pulseId}
+              rowRefs={rowRefs}
+              onOpenTask={setSelectedTask}
+              onMoveTask={moveTask}
+              canMove={can("update", "tasks")}
+            />
+          )}
         </div>
       ) : (
-        <CalendarView activePic={activePic} onOpenTask={setSelectedTask} />
+        <CalendarView
+          activePic={activePic}
+          workflowFilter={workflowFilter}
+          onOpenTask={setSelectedTask}
+        />
       )}
 
       <TaskDetailModal
@@ -2334,7 +2503,7 @@ function MacroTable({ onSelectClient }) {
 function StatusDonut() {
   const { TASKS } = useOps();
   const openTasks = TASKS.filter((t) => t.status !== "done");
-  const data = STATUSES.filter((s) => s.id !== "done")
+  const data = ALL_STATUSES.filter((s) => s.id !== "done")
     .map((s) => {
       const items = openTasks.filter((t) => t.status === s.id);
       return {
@@ -2403,7 +2572,7 @@ function WorkloadBar() {
   const { TASKS } = useOps();
   const openTasks = TASKS.filter((t) => t.status !== "done");
   const data = Object.entries(PIC).map(([id, p]) => {
-    const items = openTasks.filter((t) => t.pic === id);
+    const items = openTasks.filter((task) => taskHasPic(task, id));
     return {
       id,
       name: p.name,
@@ -2580,7 +2749,7 @@ function AtRiskList({ filter, onClearFilter }) {
                     </span>
                   )}
                   {t.revision >= 3 && <RevisionBadge revision={t.revision} />}
-                  <PicChip id={t.pic} />
+                  <PicGroup task={t} />
                   <span
                     className="tabular-nums"
                     style={{
@@ -2606,11 +2775,21 @@ function DeliveryReport({ tasks }) {
   const [mode, setMode] = useState("weekly");
   const [anchor, setAnchor] = useState(todayISO());
   const report = taskDeliveryReport(tasks, anchor, mode);
+  const standardReport = taskDeliveryReport(
+    tasks.filter((task) => (task.workflow || "standard") === "standard"),
+    anchor,
+    mode,
+  );
+  const quickReport = taskDeliveryReport(
+    tasks.filter((task) => task.workflow === "quick"),
+    anchor,
+    mode,
+  );
   const roleRows = Object.keys(PIC)
     .map((role) => ({
       role,
       ...taskDeliveryReport(
-        tasks.filter((task) => task.pic === role),
+        tasks.filter((task) => taskHasPic(task, role)),
         anchor,
         mode,
       ),
@@ -2672,6 +2851,14 @@ function DeliveryReport({ tasks }) {
         }
       />
       <p className="mb-4 text-sm font-medium text-violet-300">{periodLabel}</p>
+      <div className="mb-4 flex flex-wrap gap-2 text-xs">
+        <span className="rounded-full border border-violet-500/30 bg-violet-500/10 px-3 py-1.5 text-violet-200">
+          Standard Delivery: {standardReport.done}/{standardReport.total} done
+        </span>
+        <span className="rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-sky-200">
+          Quick Task: {quickReport.done}/{quickReport.total} done
+        </span>
+      </div>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <KpiCard
           icon={ListTodo}
@@ -4345,7 +4532,22 @@ export function saveRecord(data, kind, input) {
   if (kind === "tasks") {
     requireText(record.name, "Judul task");
     validDate(record.due, "Deadline");
-    if (!STATUS_BY_ID[record.status] || !PIC[record.pic])
+    record.workflow ||= "standard";
+    record.pics = [
+      ...new Set(
+        (Array.isArray(record.pics) ? record.pics : [record.pic]).filter(
+          (role) => PIC[role],
+        ),
+      ),
+    ];
+    record.pic = record.pics[0];
+    if (
+      !WORKFLOW_META[record.workflow] ||
+      !statusesForWorkflow(record.workflow).some(
+        (status) => status.id === record.status,
+      ) ||
+      record.pics.length === 0
+    )
       throw new Error("Status atau role task tidak valid.");
     if (
       !["normal", "urgent"].includes(record.priority) ||
@@ -4921,8 +5123,10 @@ function defaultRecord(kind, data, preset = {}) {
     tasks: {
       name: "",
       client,
+      workflow: "standard",
       status: "intake",
       pic: "project-manager",
+      pics: ["project-manager"],
       due: todayISO(),
       cycle: 0,
       revision: 0,
@@ -5059,11 +5263,62 @@ function FeedbackReadModal({ record, onClose }) {
     </Modal>
   );
 }
+
+function RoleMultiSelect({ value, onChange }) {
+  const selected = Array.isArray(value) ? value : [];
+  const toggle = (role) => {
+    const next = selected.includes(role)
+      ? selected.filter((item) => item !== role)
+      : [...selected, role];
+    onChange(next);
+  };
+
+  return (
+    <fieldset className="sm:col-span-2">
+      <legend className="mb-2 text-sm text-zinc-300">
+        PIC / pihak terlibat <span className="text-rose-300">*</span>
+      </legend>
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {Object.entries(PIC).map(([role, person]) => {
+          const active = selected.includes(role);
+          return (
+            <label
+              key={role}
+              className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors ${
+                active
+                  ? "border-violet-500 bg-violet-500/10 text-zinc-100"
+                  : "border-zinc-800 bg-zinc-900 text-zinc-400"
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={active}
+                onChange={() => toggle(role)}
+              />
+              <PicChip id={role} />
+              <span>{person.name}</span>
+            </label>
+          );
+        })}
+      </div>
+      <p className="mt-2 text-xs text-zinc-500">
+        Pilih minimal satu role. Task akan masuk ke workload dan filter setiap
+        role yang dipilih.
+      </p>
+    </fieldset>
+  );
+}
+
 function RecordEditor({ kind, record, preset, onClose }) {
   const { data, save } = useOps();
-  const [draft, setDraft] = useState(() =>
-      clone(record || defaultRecord(kind, data, preset)),
-    ),
+  const [draft, setDraft] = useState(() => {
+      const initial = clone(record || defaultRecord(kind, data, preset));
+      if (kind === "tasks") {
+        initial.workflow ||= "standard";
+        initial.pics = taskPics(initial);
+      }
+      return initial;
+    }),
     [error, setError] = useState("");
   const set = (key, value) => setDraft((d) => ({ ...d, [key]: value }));
   const field = (key, label, type = "text", extra = {}) => (
@@ -5143,12 +5398,38 @@ function RecordEditor({ kind, record, preset, onClose }) {
             <>
               {field("name", "Judul task", "text", { required: true })}
               {clientField()}
+              <label>
+                Workflow
+                <select
+                  value={draft.workflow || "standard"}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      workflow: event.target.value,
+                      status: "intake",
+                    }))
+                  }
+                >
+                  {Object.entries(WORKFLOW_META).map(([value, meta]) => (
+                    <option key={value} value={value}>
+                      {meta.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-xs text-zinc-500">
+                  {WORKFLOW_META[draft.workflow || "standard"].description}
+                </span>
+              </label>
               {field("status", "Status", "text", {
-                options: STATUSES.map((s) => ({ value: s.id, label: s.label })),
+                options: statusesForWorkflow(draft.workflow).map((status) => ({
+                  value: status.id,
+                  label: status.label,
+                })),
               })}
-              {field("pic", "Penanggung jawab (role)", "text", {
-                options: optionsFrom(PIC),
-              })}
+              <RoleMultiSelect
+                value={draft.pics}
+                onChange={(roles) => set("pics", roles)}
+              />
               {field("due", "Deadline", "date", { required: true })}
               {field("cycle", "Cycle delivery", "number", {
                 required: true,

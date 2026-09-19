@@ -49,6 +49,7 @@ class OperationsController
         Gate::authorize('manage-tasks');
         DB::transaction(function () use ($request) {
             $task = Task::create(['id' => (string) Str::uuid(), ...$this->taskData($request->validated())]);
+            $this->syncAssignees($task, $request->validated('pics'));
             $this->recordStatus($task, null, $task->status, $request->user());
         });
 
@@ -61,6 +62,7 @@ class OperationsController
         DB::transaction(function () use ($request, $task) {
             $before = $task->status;
             $task->update($this->taskData($request->validated(), $task));
+            $this->syncAssignees($task, $request->validated('pics'));
             if ($before !== $task->status) {
                 $this->recordStatus($task, $before, $task->status, $request->user());
             }
@@ -72,7 +74,10 @@ class OperationsController
     public function updateTaskStatus(Request $request, Task $task): RedirectResponse
     {
         Gate::authorize('manage-tasks');
-        $data = $request->validate(['status' => ['required', Rule::in(['intake', 'strategy', 'design', 'frontend', 'staging', 'qa', 'review', 'done'])]]);
+        $statuses = $task->workflow === 'quick'
+            ? ['intake', 'in-progress', 'validation', 'done']
+            : ['intake', 'strategy', 'design', 'frontend', 'staging', 'qa', 'review', 'done'];
+        $data = $request->validate(['status' => ['required', Rule::in($statuses)]]);
         DB::transaction(function () use ($request, $task, $data) {
             $before = $task->status;
             if ($before === $data['status']) {
@@ -171,7 +176,7 @@ class OperationsController
 
         return [
             'clients' => $readsClients ? Client::query()->orderBy('created_at')->get()->map(fn ($value) => $this->client($value))->values() : [],
-            'tasks' => $readsTasks ? Task::query()->orderBy('created_at')->get()->map(fn ($value) => $this->task($value))->values() : [],
+            'tasks' => $readsTasks ? Task::query()->with('assignees')->orderBy('created_at')->get()->map(fn ($value) => $this->task($value))->values() : [],
             'cycles' => $readsCycles ? Cycle::query()->with('variants')->orderBy('client_id')->orderBy('cycle')->get()->map(fn ($value) => $this->cycle($value))->values() : [],
             'feedback' => $readsFeedback ? Feedback::query()->orderByDesc('date')->orderByDesc('created_at')->get()->map(fn ($value) => $this->feedback($value))->values() : [],
         ];
@@ -180,7 +185,7 @@ class OperationsController
     private function taskData(array $data, ?Task $task = null): array
     {
         return [
-            'client_id' => $data['client'], 'name' => $data['name'], 'pic' => $data['pic'], 'due' => $data['due'],
+            'client_id' => $data['client'], 'name' => $data['name'], 'workflow' => $data['workflow'], 'pic' => $data['pics'][0], 'due' => $data['due'],
             'cycle' => $data['cycle'], 'revision' => $data['revision'], 'priority' => $data['priority'], 'type' => $data['type'],
             'brief' => $data['brief'] ?? '', 'blocked' => $data['blocked'],
             ...$this->completionData($task, $data['status'], $data['due']),
@@ -202,6 +207,13 @@ class OperationsController
     private function recordStatus(Task $task, ?string $from, string $to, User $actor): void
     {
         $task->statusEvents()->create(['from_status' => $from, 'to_status' => $to, 'changed_by' => $actor->id, 'due_snapshot' => $task->due]);
+    }
+
+    /** @param list<string> $roles */
+    private function syncAssignees(Task $task, array $roles): void
+    {
+        $task->assignees()->delete();
+        $task->assignees()->createMany(array_map(fn (string $role) => ['role' => $role], array_values(array_unique($roles))));
     }
 
     private function cycleData(array $data): array
@@ -240,8 +252,13 @@ class OperationsController
 
     private function task(Task $value): array
     {
+        $pics = $value->assignees->pluck('role')->values()->all();
+        if ($pics === []) {
+            $pics = [$value->pic];
+        }
+
         return ['id' => $value->id, 'name' => $value->name, 'client' => $value->client_id, 'status' => $value->status,
-            'pic' => $value->pic, 'due' => $value->due->format('Y-m-d'), 'createdAt' => $value->created_at?->toDateString(),
+            'workflow' => $value->workflow, 'pic' => $pics[0], 'pics' => $pics, 'due' => $value->due->format('Y-m-d'), 'createdAt' => $value->created_at?->toDateString(),
             'completedAt' => $value->completed_at?->format('Y-m-d'), 'dueAtCompletion' => $value->due_at_completion?->format('Y-m-d'),
             'cycle' => $value->cycle, 'revision' => $value->revision, 'priority' => $value->priority, 'type' => $value->type,
             'brief' => $value->brief ?? '', 'blocked' => $value->blocked];

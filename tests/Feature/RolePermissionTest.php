@@ -49,7 +49,7 @@ class RolePermissionTest extends TestCase
         $client = Client::where('name', 'Dynamic Permission Client')->firstOrFail();
         Task::create([
             'id' => 'dynamic-task', 'client_id' => $client->id, 'name' => 'Visible task', 'status' => 'intake',
-            'pic' => 'developer', 'due' => '2026-09-20', 'cycle' => 1, 'revision' => 0,
+            'workflow' => 'standard', 'pic' => 'developer', 'due' => '2026-09-20', 'cycle' => 1, 'revision' => 0,
             'priority' => 'normal', 'type' => 'feature', 'brief' => '', 'blocked' => false,
         ]);
 

@@ -29,12 +29,15 @@ class OperationalDataSeeder extends Seeder
                 ['id' => (string) $source['id']],
                 [
                     'client_id' => $source['client'], 'name' => $source['name'], 'status' => $source['status'],
-                    'pic' => $source['pic'], 'due' => $source['due'], 'completed_at' => $done ? $source['due'] : null,
+                    'workflow' => $source['workflow'] ?? 'standard', 'pic' => $source['pic'], 'due' => $source['due'], 'completed_at' => $done ? $source['due'] : null,
                     'due_at_completion' => $done ? $source['due'] : null, 'cycle' => $source['cycle'],
                     'revision' => $source['revision'], 'priority' => $source['priority'], 'type' => $source['type'],
                     'brief' => $source['brief'] ?? '', 'blocked' => $source['blocked'] ?? false,
                 ],
             );
+            $roles = array_values(array_unique($source['pics'] ?? [$source['pic']]));
+            $task->assignees()->delete();
+            $task->assignees()->createMany(array_map(fn (string $role) => ['role' => $role], $roles));
             if ($task->statusEvents()->doesntExist()) {
                 $task->statusEvents()->create([
                     'from_status' => null, 'to_status' => $task->status, 'changed_by' => $actorId, 'due_snapshot' => $task->due,

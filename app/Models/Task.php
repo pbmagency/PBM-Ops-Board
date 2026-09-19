@@ -11,7 +11,7 @@ class Task extends Model
 
     protected $keyType = 'string';
 
-    protected $fillable = ['id', 'client_id', 'name', 'status', 'pic', 'due', 'completed_at', 'due_at_completion', 'cycle', 'revision', 'priority', 'type', 'brief', 'blocked'];
+    protected $fillable = ['id', 'client_id', 'name', 'workflow', 'status', 'pic', 'due', 'completed_at', 'due_at_completion', 'cycle', 'revision', 'priority', 'type', 'brief', 'blocked'];
 
     protected function casts(): array
     {
@@ -21,5 +21,10 @@ class Task extends Model
     public function statusEvents(): HasMany
     {
         return $this->hasMany(TaskStatusEvent::class);
+    }
+
+    public function assignees(): HasMany
+    {
+        return $this->hasMany(TaskAssignee::class);
     }
 }
