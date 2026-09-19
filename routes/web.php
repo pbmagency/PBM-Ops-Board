@@ -23,6 +23,8 @@ Route::middleware('auth')->group(function () {
     Route::post('/tasks', [OperationsController::class, 'storeTask'])->name('tasks.store');
     Route::put('/tasks/{task}', [OperationsController::class, 'updateTask'])->name('tasks.update');
     Route::patch('/tasks/{task}/status', [OperationsController::class, 'updateTaskStatus'])->name('tasks.status');
+    Route::patch('/tasks/{task}/checklist', [OperationsController::class, 'updateTaskChecklist'])->name('tasks.checklist.replace');
+    Route::patch('/tasks/{task}/checklist/{item}', [OperationsController::class, 'updateChecklistItem'])->name('tasks.checklist.update');
     Route::delete('/tasks/{task}', [OperationsController::class, 'destroyTask'])->name('tasks.destroy');
     Route::post('/cycles', [OperationsController::class, 'storeCycle'])->name('cycles.store');
     Route::put('/cycles/{cycle}', [OperationsController::class, 'updateCycle'])->name('cycles.update');

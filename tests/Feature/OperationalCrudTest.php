@@ -33,6 +33,7 @@ class OperationalCrudTest extends TestCase
         $this->assertDatabaseHas('task_status_events', ['task_id' => $task->id, 'to_status' => 'intake']);
         $this->assertDatabaseHas('task_assignees', ['task_id' => $task->id, 'role' => 'developer']);
         $this->assertDatabaseHas('task_assignees', ['task_id' => $task->id, 'role' => 'creative']);
+        $this->assertDatabaseHas('task_checklist_items', ['task_id' => $task->id, 'label' => 'Strategy & Copy']);
 
         $this->actingAs($coo)->patch("/tasks/{$task->id}/status", ['status' => 'done'])->assertRedirect();
         $task->refresh();
@@ -98,7 +99,7 @@ class OperationalCrudTest extends TestCase
         }
     }
 
-    public function test_quick_task_uses_short_workflow_and_multiple_assignees(): void
+    public function test_every_work_type_uses_the_same_statuses_and_supports_multiple_assignees(): void
     {
         $coo = User::where('email', 'coo@gmail.com')->firstOrFail();
         $client = Client::create(['id' => 'quick-client', 'name' => 'Quick Client', 'contract' => 'Retainer', 'bottleneck' => '']);
@@ -113,22 +114,49 @@ class OperationalCrudTest extends TestCase
         $this->assertCount(2, $task->assignees);
 
         $this->actingAs($coo)
-            ->patch("/tasks/{$task->id}/status", ['status' => 'validation'])
+            ->patch("/tasks/{$task->id}/status", ['status' => 'review'])
             ->assertRedirect();
-        $this->assertDatabaseHas('tasks', ['id' => $task->id, 'status' => 'validation']);
+        $this->assertDatabaseHas('tasks', ['id' => $task->id, 'status' => 'review']);
 
         $this->actingAs($coo)
             ->patch("/tasks/{$task->id}/status", ['status' => 'strategy'])
             ->assertSessionHasErrors('status');
+
+        $buildPayload = $this->taskPayload($client->id, 'Build landing page');
+        $buildPayload['workflow'] = 'build';
+        $this->actingAs($coo)->post('/tasks', $buildPayload)->assertRedirect();
+        $buildTask = Task::with('checklistItems')->where('name', 'Build landing page')->firstOrFail();
+        $this->assertCount(7, $buildTask->checklistItems);
+
+        $item = $buildTask->checklistItems->first();
+        $this->actingAs($coo)
+            ->patch("/tasks/{$buildTask->id}/checklist/{$item->id}", ['completed' => true])
+            ->assertRedirect();
+        $this->assertDatabaseHas('task_checklist_items', ['id' => $item->id, 'completed' => true]);
+
+        $this->actingAs($coo)->patch("/tasks/{$buildTask->id}/checklist", [
+            'checklist' => [
+                ['label' => 'Brief approved', 'completed' => true],
+                ['label' => 'Build selesai', 'completed' => false],
+            ],
+        ])->assertRedirect();
+        $this->assertDatabaseCount('task_checklist_items', 2);
+        $this->assertDatabaseHas('task_checklist_items', ['task_id' => $buildTask->id, 'label' => 'Brief approved']);
+
+        $developer = User::where('email', 'developer@gmail.com')->firstOrFail();
+        $replacementItem = $buildTask->checklistItems()->firstOrFail();
+        $this->actingAs($developer)
+            ->patch("/tasks/{$buildTask->id}/checklist/{$replacementItem->id}", ['completed' => false])
+            ->assertForbidden();
     }
 
     private function taskPayload(string $client, string $name = 'Database Task'): array
     {
         return [
-            'client' => $client, 'name' => $name, 'workflow' => 'standard', 'status' => 'intake',
+            'client' => $client, 'name' => $name, 'workflow' => 'build', 'status' => 'intake',
             'pics' => ['developer', 'creative'],
-            'due' => '2026-09-20', 'cycle' => 1, 'revision' => 0, 'priority' => 'normal',
-            'type' => 'feature', 'brief' => 'Persisted task', 'blocked' => false,
+            'due' => '2026-09-20', 'cycle' => 1, 'priority' => 'normal',
+            'brief' => 'Persisted task', 'blocked' => false,
         ];
     }
 }

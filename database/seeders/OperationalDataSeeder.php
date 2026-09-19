@@ -24,20 +24,36 @@ class OperationalDataSeeder extends Seeder
 
         $actorId = User::query()->where('role', 'coo')->value('id');
         foreach ($data['tasks'] as $source) {
-            $done = $source['status'] === 'done';
+            $status = match ($source['status']) {
+                'strategy', 'design', 'frontend' => 'in-progress',
+                'staging', 'qa', 'validation' => 'review',
+                default => $source['status'],
+            };
+            $workflow = ($source['workflow'] ?? 'standard') === 'quick' ? 'quick' : 'build';
+            $done = $status === 'done';
             $task = Task::query()->updateOrCreate(
                 ['id' => (string) $source['id']],
                 [
-                    'client_id' => $source['client'], 'name' => $source['name'], 'status' => $source['status'],
-                    'workflow' => $source['workflow'] ?? 'standard', 'pic' => $source['pic'], 'due' => $source['due'], 'completed_at' => $done ? $source['due'] : null,
+                    'client_id' => $source['client'], 'name' => $source['name'], 'status' => $status,
+                    'workflow' => $workflow, 'pic' => $source['pic'], 'due' => $source['due'], 'completed_at' => $done ? $source['due'] : null,
                     'due_at_completion' => $done ? $source['due'] : null, 'cycle' => $source['cycle'],
-                    'revision' => $source['revision'], 'priority' => $source['priority'], 'type' => $source['type'],
-                    'brief' => $source['brief'] ?? '', 'blocked' => $source['blocked'] ?? false,
+                    'priority' => $source['priority'], 'brief' => $source['brief'] ?? '', 'blocked' => $source['blocked'] ?? false,
                 ],
             );
             $roles = array_values(array_unique($source['pics'] ?? [$source['pic']]));
             $task->assignees()->delete();
             $task->assignees()->createMany(array_map(fn (string $role) => ['role' => $role], $roles));
+            $templates = [
+                'build' => ['Strategy & Copy', 'Design & Backend', 'Frontend', 'Staging', 'Internal QA', 'Client Review', 'Launch'],
+                'optimization' => ['Identifikasi perubahan', 'Implementasi', 'QA', 'Approval', 'Publish'],
+                'quick' => [],
+            ];
+            $task->checklistItems()->delete();
+            $task->checklistItems()->createMany(array_map(
+                fn (string $label, int $position) => ['label' => $label, 'position' => $position, 'completed' => $done],
+                $templates[$workflow],
+                array_keys($templates[$workflow]),
+            ));
             if ($task->statusEvents()->doesntExist()) {
                 $task->statusEvents()->create([
                     'from_status' => null, 'to_status' => $task->status, 'changed_by' => $actorId, 'due_snapshot' => $task->due,

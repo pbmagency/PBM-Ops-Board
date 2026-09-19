@@ -10,7 +10,6 @@ import {
   AlertTriangle,
   Clock,
   GitBranch,
-  RotateCcw,
   X,
   ChevronRight,
   ChevronLeft,
@@ -76,48 +75,8 @@ function pillStyle(color) {
 
 /* -------------------------- data model: delivery -------------------------- */
 
-const STANDARD_STATUSES = [
-  {
-    id: "intake",
-    label: "Intake & Backlog",
-    short: "Intake",
-    color: "#71717a",
-  },
-  {
-    id: "strategy",
-    label: "Strategy & Copy",
-    short: "Strategy",
-    color: "#818cf8",
-  },
-  {
-    id: "design",
-    label: "Design & Backend",
-    short: "Design & Backend",
-    color: COLOR.violet,
-  },
-  {
-    id: "frontend",
-    label: "Frontend Build",
-    short: "Frontend",
-    color: COLOR.sky,
-  },
-  { id: "staging", label: "Staging", short: "Staging", color: COLOR.amber },
-  {
-    id: "qa",
-    label: "Internal QA & Testing",
-    short: "QA",
-    color: COLOR.emerald,
-  },
-  {
-    id: "review",
-    label: "Client Review & Revision",
-    short: "Review",
-    color: COLOR.rose,
-  },
-  { id: "done", label: "Live & Done", short: "Done", color: "#52525b" },
-];
-const QUICK_STATUSES = [
-  { id: "intake", label: "Intake", short: "Intake", color: "#71717a" },
+const STATUSES = [
+  { id: "intake", label: "Intake / To Do", short: "Intake", color: "#71717a" },
   {
     id: "in-progress",
     label: "In Progress",
@@ -125,33 +84,38 @@ const QUICK_STATUSES = [
     color: COLOR.sky,
   },
   {
-    id: "validation",
-    label: "Validation",
-    short: "Validation",
+    id: "review",
+    label: "Review",
+    short: "Review",
     color: COLOR.amber,
   },
   { id: "done", label: "Done", short: "Done", color: COLOR.emerald },
 ];
-const STATUSES = STANDARD_STATUSES;
-const ALL_STATUSES = [
-  ...STANDARD_STATUSES,
-  ...QUICK_STATUSES.filter(
-    (quick) => !STANDARD_STATUSES.some((standard) => standard.id === quick.id),
-  ),
-];
-const STATUS_BY_ID = Object.fromEntries(ALL_STATUSES.map((s) => [s.id, s]));
+const STATUS_BY_ID = Object.fromEntries(STATUSES.map((s) => [s.id, s]));
 const WORKFLOW_META = {
-  standard: {
-    label: "Standard Delivery",
-    description: "Workflow build dan optimize lengkap",
+  build: {
+    label: "Build",
+    description: "Pembuatan aset atau sistem baru",
+    color: ACCENT,
+  },
+  optimization: {
+    label: "Optimization",
+    description: "Peningkatan performa atau hasil",
+    color: COLOR.emerald,
   },
   quick: {
-    label: "Quick Task",
+    label: "Quick",
     description: "Revisi kecil dan pekerjaan teknis singkat",
+    color: COLOR.sky,
   },
 };
-const statusesForWorkflow = (workflow) =>
-  workflow === "quick" ? QUICK_STATUSES : STANDARD_STATUSES;
+const CHECKLIST_TEMPLATES = {
+  build: ["Strategy & Copy", "Design & Backend", "Frontend", "Staging", "Internal QA", "Client Review", "Launch"],
+  optimization: ["Identifikasi perubahan", "Implementasi", "QA", "Approval", "Publish"],
+  quick: [],
+};
+const checklistFor = (workflow) =>
+  (CHECKLIST_TEMPLATES[workflow] || []).map((label) => ({ label, completed: false }));
 const taskPics = (task) => {
   const roles = Array.isArray(task?.pics) ? task.pics : [task?.pic];
   return [...new Set(roles.filter((role) => PIC[role]))];
@@ -1152,7 +1116,6 @@ function formatDate(iso) {
 }
 function urgencyColor(task) {
   if (task.status === "done") return null;
-  if (task.type === "hotfix") return COLOR.rose;
   if (isOverdue(task)) return COLOR.rose;
   if (daysUntil(task.due) <= 2) return COLOR.amber;
   return null;
@@ -1237,24 +1200,6 @@ function HealthBadge({ health }) {
   );
 }
 
-function RevisionBadge({ revision, total = 3 }) {
-  const color =
-    revision >= total
-      ? COLOR.rose
-      : revision >= total - 1
-        ? COLOR.amber
-        : COLOR.zinc;
-  return (
-    <span
-      className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 font-medium"
-      style={{ ...pillStyle(color), fontSize: 10 }}
-    >
-      <RotateCcw className="h-2.5 w-2.5" />
-      {revision}/{total}
-    </span>
-  );
-}
-
 function CycleTag({ cycle, total = 3 }) {
   if (cycle === 0) {
     return (
@@ -1302,6 +1247,29 @@ function PicChip({ id }) {
     >
       {p.initials}
     </span>
+  );
+}
+
+function WorkTypeTag({ workflow }) {
+  const meta = WORKFLOW_META[workflow] || WORKFLOW_META.build;
+  return (
+    <span className="inline-flex items-center rounded-full px-1.5 py-0.5 font-medium" style={{ ...pillStyle(meta.color), fontSize: 10 }}>
+      {meta.label}
+    </span>
+  );
+}
+
+function ChecklistProgress({ task, compact = false }) {
+  const items = task.checklist || [];
+  if (!items.length) return null;
+  const done = items.filter((item) => item.completed).length;
+  return (
+    <div className={compact ? "flex items-center gap-1" : "mt-2"} title={`${done} dari ${items.length} langkah selesai`}>
+      {!compact && <div className="mb-1 flex justify-between text-[10px] text-zinc-500"><span>Proses</span><span>{done}/{items.length}</span></div>}
+      <div className={`${compact ? "h-1 w-10" : "h-1.5 w-full"} overflow-hidden rounded-full bg-zinc-800`}>
+        <div className="h-full rounded-full bg-emerald-400" style={{ width: `${Math.round((done / items.length) * 100)}%` }} />
+      </div>
+    </div>
   );
 }
 
@@ -1551,7 +1519,7 @@ function Pager({ page, pageCount, total, from, to, onChange }) {
   );
 }
 
-/* -------------------------- task card + cell (Execution Board) -------------------------- */
+/* -------------------------- task card + cell (Task Board) -------------------------- */
 
 function TaskCard({ task, dimmed, onClick }) {
   const { can } = useOps();
@@ -1587,15 +1555,7 @@ function TaskCard({ task, dimmed, onClick }) {
           Urgent
         </span>
       )}
-      {task.workflow === "quick" && (
-        <span
-          className="mb-2 ml-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-bold uppercase tracking-wider"
-          style={{ ...pillStyle(COLOR.sky), fontSize: 10 }}
-        >
-          <Zap className="h-3 w-3" />
-          Quick
-        </span>
-      )}
+      <div className="mb-2"><WorkTypeTag workflow={task.workflow} /></div>
       <div className="flex items-start justify-between gap-2">
         <p
           className="font-medium leading-snug text-zinc-100"
@@ -1603,11 +1563,6 @@ function TaskCard({ task, dimmed, onClick }) {
         >
           {task.name}
         </p>
-        <div className="flex shrink-0 items-center gap-1">
-          {task.type === "hotfix" && (
-            <Zap className="h-3 w-3" style={{ color: COLOR.rose }} />
-          )}
-        </div>
       </div>
 
       <div
@@ -1628,8 +1583,9 @@ function TaskCard({ task, dimmed, onClick }) {
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
         <PriorityTag priority={task.priority} />
         <CycleTag cycle={task.cycle} />
-        {task.revision > 0 && <RevisionBadge revision={task.revision} />}
       </div>
+
+      <ChecklistProgress task={task} />
 
       <div className="mt-2.5 flex items-center gap-1.5 border-t border-zinc-800 pt-2">
         <PicGroup task={task} showNames />
@@ -1663,14 +1619,7 @@ function CompactTaskRow({ task, dimmed, onClick }) {
       }}
     >
       <PicGroup task={task} />
-      {task.workflow === "quick" && (
-        <span className="shrink-0 text-sky-300" style={{ fontSize: 9 }}>
-          QUICK
-        </span>
-      )}
-      {task.type === "hotfix" && (
-        <Zap className="h-3 w-3 shrink-0" style={{ color: COLOR.rose }} />
-      )}
+      <WorkTypeTag workflow={task.workflow} />
       {urgent && (
         <span
           className="inline-flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 font-bold uppercase tracking-wide"
@@ -1692,6 +1641,7 @@ function CompactTaskRow({ task, dimmed, onClick }) {
       >
         {formatDate(task.due)}
       </span>
+      <ChecklistProgress task={task} compact />
     </button>
   );
 }
@@ -1770,7 +1720,7 @@ function PicFilterSelect({ activePic, onChange }) {
       <span className="shrink-0">Filter PIC</span>
       <select
         className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-zinc-200 focus:border-violet-500 focus:outline-none"
-        aria-label="Filter PIC execution board"
+        aria-label="Filter PIC task board"
         value={activePic || ""}
         onChange={(event) => onChange(event.target.value || null)}
       >
@@ -1782,40 +1732,6 @@ function PicFilterSelect({ activePic, onChange }) {
         ))}
       </select>
     </label>
-  );
-}
-
-function HotfixBanner({ tasks, onOpenTask }) {
-  const items = tasks.filter((t) => t.type === "hotfix" && t.status !== "done");
-  if (items.length === 0) return null;
-  return (
-    <div
-      className="mb-4 rounded-xl p-3"
-      style={{
-        backgroundColor: rgba(COLOR.rose, 0.08),
-        border: `1px solid ${rgba(COLOR.rose, 0.28)}`,
-      }}
-    >
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-        <span
-          className="flex items-center gap-1.5 font-medium"
-          style={{ color: COLOR.rose, fontSize: 12.5 }}
-        >
-          <Zap className="h-3.5 w-3.5" />
-          {items.length} Hotfix aktif — di luar workflow normal
-        </span>
-        {items.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => onOpenTask(t)}
-            className="underline decoration-dotted hover:text-zinc-100"
-            style={{ fontSize: 12, color: "#e4e4e7" }}
-          >
-            {t.name}
-          </button>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -1869,65 +1785,162 @@ function DetailField({ label, value, sub, icon, valueColor }) {
 }
 
 function TaskDetailModal({ task, onClose }) {
-  const { getClient, openEditor, askDelete, moveTask, can } = useOps();
+  const {
+    getClient,
+    currentUser,
+    openEditor,
+    askDelete,
+    moveTask,
+    toggleChecklist,
+    saveTaskChecklist,
+    can,
+  } = useOps();
+  const [editingChecklist, setEditingChecklist] = useState(false);
+  const [draftChecklist, setDraftChecklist] = useState([]);
+  const [checklistError, setChecklistError] = useState("");
+  const [savingChecklist, setSavingChecklist] = useState(false);
+
+  useEffect(() => {
+    setDraftChecklist(clone(task?.checklist || []));
+    setEditingChecklist(false);
+    setChecklistError("");
+  }, [task?.id]);
+
+  useEffect(() => {
+    if (!editingChecklist) setDraftChecklist(clone(task?.checklist || []));
+  }, [task?.checklist, editingChecklist]);
+
   if (!task) return null;
+  const workflow = WORKFLOW_META[task.workflow] || WORKFLOW_META.build;
+  const checklist = task.checklist || [];
+  const displayedChecklist = editingChecklist ? draftChecklist : checklist;
+  const displayedCompletedCount = displayedChecklist.filter((item) => item.completed).length;
+  const displayedProgress = displayedChecklist.length
+    ? Math.round((displayedCompletedCount / displayedChecklist.length) * 100)
+    : 0;
+  const canManageChecklist =
+    ["coo", "project-manager"].includes(currentUser?.role) &&
+    can("update", "tasks");
+
+  async function submitChecklist() {
+    const normalized = draftChecklist
+      .map((item) => ({
+        label: String(item.label || "").trim(),
+        completed: !!item.completed,
+      }))
+      .filter((item) => item.label);
+    if (!normalized.length) {
+      setChecklistError("Tambahkan minimal satu langkah checklist.");
+      return;
+    }
+    setSavingChecklist(true);
+    setChecklistError("");
+    try {
+      await saveTaskChecklist(task.id, normalized);
+      setEditingChecklist(false);
+    } catch (error) {
+      setChecklistError(error.message);
+    } finally {
+      setSavingChecklist(false);
+    }
+  }
+
   return (
-    <Modal title={task.name} onClose={onClose}>
-      <p className="mb-5 text-sm text-zinc-400">
-        {getClient(task.client).name} · {WORKFLOW_META[task.workflow || "standard"].label} · {formatDate(task.due)}
-      </p>
-      <div className="mb-5 rounded-lg border border-zinc-800 bg-zinc-900 p-3">
-        <p className="mb-2 text-xs uppercase tracking-wide text-zinc-500">
-          PIC / pihak terlibat
-        </p>
-        <PicGroup task={task} showNames />
+    <Modal title={task.name} onClose={onClose} className="ops-dialog-task-detail">
+      <div className="task-detail-meta-row">
+        <div className="flex flex-wrap items-center gap-2">
+          <WorkTypeTag workflow={task.workflow} />
+          <CycleTag cycle={task.cycle} />
+          <PriorityTag priority={task.priority} />
+          {task.blocked && <span className="rounded-full bg-rose-500/10 px-2 py-1 text-xs font-medium text-rose-300">Blocked</span>}
+        </div>
+        <div className="text-sm text-zinc-400">
+          <span className="font-medium text-zinc-200">{getClient(task.client).name}</span>
+          <span className="mx-2 text-zinc-700">•</span>
+          Deadline {formatDate(task.due)}
+        </div>
       </div>
-      {can("update", "tasks") ? (
-        <label>
-          Status task
-          <select
-            value={task.status}
-            onChange={(e) => moveTask(task.id, e.target.value)}
-          >
-            {statusesForWorkflow(task.workflow).map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
+
+      <div className="task-detail-summary-grid">
+        <div className="task-detail-summary-card">
+          <p className="task-detail-label">PIC / pihak terlibat</p>
+          <div className="mt-2"><PicGroup task={task} showNames /></div>
+        </div>
+        <div className="task-detail-summary-card">
+          <p className="task-detail-label">Status task</p>
+          {can("update", "tasks") ? (
+            <select className="mt-2" value={task.status} onChange={(event) => moveTask(task.id, event.target.value)}>
+              {STATUSES.map((status) => (
+                <option key={status.id} value={status.id}>{status.label}</option>
+              ))}
+            </select>
+          ) : (
+            <p className="mt-2 text-sm font-medium text-zinc-100">{STATUS_BY_ID[task.status].label}</p>
+          )}
+        </div>
+      </div>
+
+      <section className="task-detail-section">
+        <div className="task-checklist-heading">
+          <div>
+            <p className="task-detail-label">Checklist proses</p>
+            <p className="mt-1 text-sm text-zinc-300">{displayedCompletedCount} dari {displayedChecklist.length} langkah selesai</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-semibold text-emerald-300">{displayedProgress}%</span>
+            {canManageChecklist && !editingChecklist && (
+              <button className="ops-button" onClick={() => setEditingChecklist(true)}>Edit langkah</button>
+            )}
+          </div>
+        </div>
+        <div className="mb-4 h-1.5 overflow-hidden rounded-full bg-zinc-800">
+          <div className="h-full rounded-full bg-emerald-400 transition-all" style={{ width: `${displayedProgress}%` }} />
+        </div>
+
+        {editingChecklist ? (
+          <div className="space-y-2">
+            {draftChecklist.map((item, index) => (
+              <div key={item.id || index} className="task-checklist-edit-row">
+                <input type="checkbox" checked={!!item.completed} onChange={(event) => setDraftChecklist((items) => items.map((entry, itemIndex) => itemIndex === index ? { ...entry, completed: event.target.checked } : entry))} />
+                <input aria-label={`Nama langkah ${index + 1}`} value={item.label} onChange={(event) => setDraftChecklist((items) => items.map((entry, itemIndex) => itemIndex === index ? { ...entry, label: event.target.value } : entry))} />
+                <button type="button" className="ops-button ops-danger" aria-label={`Hapus langkah ${index + 1}`} onClick={() => setDraftChecklist((items) => items.filter((_, itemIndex) => itemIndex !== index))}>Hapus</button>
+              </div>
             ))}
-          </select>
-        </label>
-      ) : (
-        <DetailField label="Status" value={STATUS_BY_ID[task.status].label} />
-      )}
-      <div className="my-5 flex flex-wrap gap-2">
-        <span
-          className="rounded-full px-2 py-0.5 text-xs font-medium"
-          style={pillStyle(task.workflow === "quick" ? COLOR.sky : ACCENT)}
-        >
-          {WORKFLOW_META[task.workflow || "standard"].label}
-        </span>
-        <CycleTag cycle={task.cycle} />
-        <RevisionBadge revision={task.revision} />
-        <PriorityTag priority={task.priority} />
-        {task.type === "hotfix" && (
-          <span className="text-rose-300">Hotfix</span>
+            <button type="button" className="ops-button mt-2" onClick={() => setDraftChecklist((items) => [...items, { label: "", completed: false }])}>+ Tambah langkah</button>
+            {checklistError && <p className="text-sm text-rose-300">{checklistError}</p>}
+            <div className="flex justify-end gap-2 border-t border-zinc-800 pt-4">
+              <button type="button" className="ops-button" onClick={() => { setDraftChecklist(clone(task.checklist || [])); setEditingChecklist(false); setChecklistError(""); }}>Batal</button>
+              <button type="button" className="ops-button ops-primary" disabled={savingChecklist} onClick={submitChecklist}>{savingChecklist ? "Menyimpan…" : "Simpan checklist"}</button>
+            </div>
+          </div>
+        ) : checklist.length ? (
+          <div className="task-checklist-list">
+            {checklist.map((item, index) => (
+              <div key={item.id || item.label} className="task-checklist-view-row">
+                <input aria-label={item.label} type="checkbox" checked={!!item.completed} disabled={!canManageChecklist} onChange={(event) => toggleChecklist(task.id, item.id, event.target.checked)} />
+                <span className="task-checklist-number">{index + 1}</span>
+                <span className={`min-w-0 flex-1 text-sm ${item.completed ? "text-zinc-500 line-through" : "text-zinc-200"}`}>{item.label}</span>
+                <span className={`text-xs ${item.completed ? "text-emerald-300" : "text-zinc-600"}`}>{item.completed ? "Selesai" : "Belum"}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-zinc-700 px-4 py-5 text-center text-sm text-zinc-500">
+            Belum ada checklist.{canManageChecklist ? " Pilih Edit langkah untuk menambah proses." : ""}
+          </div>
         )}
-        {task.blocked && <span className="text-rose-300">Blocked</span>}
-      </div>
-      <p className="whitespace-pre-wrap text-sm leading-7 text-zinc-200">
-        {task.brief || "Belum ada brief."}
-      </p>
+        {canManageChecklist && !editingChecklist && checklist.length > 0 && (
+          <p className="mt-3 text-xs text-zinc-500">Centang langkah untuk memperbarui progress secara langsung.</p>
+        )}
+      </section>
+
+      <section className="task-detail-section">
+        <p className="task-detail-label">Brief</p>
+        <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-300">{task.brief || "Belum ada brief untuk task ini."}</p>
+      </section>
+
       {can("update", "tasks") && (
-        <div className="mt-6 flex gap-2">
-          <button
-            className="ops-button ops-primary"
-            onClick={() => {
-              onClose();
-              openEditor("tasks", task);
-            }}
-          >
-            Edit task
-          </button>
+        <div className="mt-5 flex flex-wrap justify-end gap-2">
           <button
             className="ops-button ops-danger"
             onClick={() => {
@@ -1936,6 +1949,15 @@ function TaskDetailModal({ task, onClose }) {
             }}
           >
             Hapus task
+          </button>
+          <button
+            className="ops-button ops-primary"
+            onClick={() => {
+              onClose();
+              openEditor("tasks", task);
+            }}
+          >
+            Edit task
           </button>
         </div>
       )}
@@ -1960,8 +1982,8 @@ function getMonthMatrix(year, monthIndex) {
   return weeks;
 }
 
-function CalendarView({ activePic, workflowFilter, onOpenTask }) {
-  const { TASKS, CLIENT_COLOR } = useOps();
+function CalendarView({ tasks, activePic, onOpenTask }) {
+  const { CLIENT_COLOR } = useOps();
   const [cursor, setCursor] = useState(
     new Date(new Date().getFullYear(), new Date().getMonth(), 1),
   );
@@ -1977,12 +1999,7 @@ function CalendarView({ activePic, workflowFilter, onOpenTask }) {
   function tasksOnDay(day) {
     if (!day) return [];
     const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-    return TASKS.filter(
-      (t) =>
-        t.due === iso &&
-        (workflowFilter === "all" ||
-          (t.workflow || "standard") === workflowFilter),
-    );
+    return tasks.filter((t) => t.due === iso);
   }
 
   return (
@@ -2018,7 +2035,7 @@ function CalendarView({ activePic, workflowFilter, onOpenTask }) {
             ...new Set([
               todayISO().slice(0, 7),
               `${year}-${String(month + 1).padStart(2, "0")}`,
-              ...TASKS.map((t) => t.due.slice(0, 7)),
+              ...tasks.map((t) => t.due.slice(0, 7)),
             ]),
           ]
             .sort()
@@ -2046,13 +2063,8 @@ function CalendarView({ activePic, workflowFilter, onOpenTask }) {
 
       <p className="mb-3 text-sm text-zinc-400">
         {
-          TASKS.filter(
-            (t) =>
-              t.due.startsWith(
-                `${year}-${String(month + 1).padStart(2, "0")}`,
-              ) &&
-              (workflowFilter === "all" ||
-                (t.workflow || "standard") === workflowFilter),
+          tasks.filter((t) =>
+            t.due.startsWith(`${year}-${String(month + 1).padStart(2, "0")}`),
           ).length
         }{" "}
         task bulan ini · tanggal mengikuti deadline. Pilih bulan lain untuk
@@ -2122,9 +2134,6 @@ function CalendarView({ activePic, workflowFilter, onOpenTask }) {
                                   color: c,
                                 }}
                               >
-                                {t.type === "hotfix" && (
-                                  <Zap className="h-2.5 w-2.5 shrink-0" />
-                                )}
                                 <span className="truncate">{t.name}</span>
                               </button>
                             );
@@ -2153,13 +2162,12 @@ function WorkflowBoardGrid({
   pulseId,
   rowRefs,
   onOpenTask,
+  onAddTask,
   onMoveTask,
   canMove,
 }) {
   const gridTemplate = `210px repeat(${statuses.length}, minmax(190px, 1fr))`;
-  const visibleClients = clients.filter((client) =>
-    tasks.some((task) => task.client === client.id),
-  );
+  const visibleClients = clients;
   const statusCounts = Object.fromEntries(
     statuses.map((status) => [
       status.id,
@@ -2236,6 +2244,11 @@ function WorkflowBoardGrid({
                         </span>
                       )}
                     </span>
+                    {onAddTask && (
+                      <button className="mt-1 self-start text-xs font-medium text-violet-300 hover:text-violet-200" onClick={() => onAddTask(client.id)}>
+                        + Task
+                      </button>
+                    )}
                   </div>
                   {statuses.map((status) => {
                     const cellTasks = clientTasks.filter(
@@ -2281,13 +2294,13 @@ function WorkflowBoardGrid({
   );
 }
 
-/* -------------------------- Monthly Execution Board -------------------------- */
+/* -------------------------- Task Board -------------------------- */
 
 function ExecutionBoard({ highlightClient, onHighlightHandled }) {
-  const { CLIENTS, TASKS, openEditor, moveTask, can } = useOps();
+  const { CLIENTS, TASKS, currentUser, openEditor, moveTask, can } = useOps();
   const [viewMode, setViewMode] = useState("kanban");
   const [activePic, setActivePic] = useState(null);
-  const [workflowFilter, setWorkflowFilter] = useState("all");
+  const [scope, setScope] = useState(["coo", "project-manager"].includes(currentUser?.role) ? "all" : "mine");
   const [doneWindow, setDoneWindow] = useState("weekly");
   const [pulseId, setPulseId] = useState(null);
   const [selectedTask, setSelectedTask] = useState(null);
@@ -2311,11 +2324,11 @@ function ExecutionBoard({ highlightClient, onHighlightHandled }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlightClient]);
 
-  const boardTasks = TASKS.filter((task) => doneTaskVisible(task, doneWindow));
-  const standardTasks = boardTasks.filter(
-    (task) => (task.workflow || "standard") === "standard",
+  const scopedTasks = TASKS.filter((task) =>
+    (scope === "all" || taskHasPic(task, currentUser?.role)) &&
+    (!activePic || taskHasPic(task, activePic)),
   );
-  const quickTasks = boardTasks.filter((task) => task.workflow === "quick");
+  const boardTasks = scopedTasks.filter((task) => doneTaskVisible(task, doneWindow));
   const hiddenDoneCount = TASKS.filter(
     (task) => task.status === "done" && !doneTaskVisible(task, doneWindow),
   ).length;
@@ -2323,9 +2336,9 @@ function ExecutionBoard({ highlightClient, onHighlightHandled }) {
     <section className="space-y-5">
       <PageHeader
         icon={LayoutGrid}
-        eyebrow="Execution Board"
-        title="Task delivery per client dan tahap"
-        description="Pantau pekerjaan aktif, pindahkan status, dan buka detail task. Task selesai lama tetap tersimpan untuk laporan, tetapi disembunyikan dari board secara otomatis."
+        eyebrow="Task Board"
+        title="Semua pekerjaan, satu board"
+        description="Setiap client memiliki satu baris. Pindahkan task dari Intake ke Done, lalu pantau detail prosesnya lewat checklist."
         actions={<ViewToggle mode={viewMode} onChange={setViewMode} />}
       />
 
@@ -2371,61 +2384,36 @@ function ExecutionBoard({ highlightClient, onHighlightHandled }) {
           Belum ada client. Tambahkan client melalui tab Clients.
         </p>
       )}
-      <HotfixBanner tasks={TASKS} onOpenTask={setSelectedTask} />
-      <div className="flex flex-wrap items-center gap-4">
+      <div className="flex flex-wrap items-center gap-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+        <div className="mb-4 flex rounded-lg border border-zinc-800 bg-zinc-950 p-1">
+          {[{ id: "all", label: "Semua Task" }, { id: "mine", label: "Task Saya" }].map((option) => (
+            <button key={option.id} onClick={() => setScope(option.id)} className={`rounded-md px-3 py-1.5 text-sm ${scope === option.id ? "bg-violet-600 text-white" : "text-zinc-400 hover:text-zinc-200"}`}>
+              {option.label}
+            </button>
+          ))}
+        </div>
         <PicFilterSelect activePic={activePic} onChange={setActivePic} />
-        <label className="mb-4 flex max-w-xs items-center gap-3 text-sm text-zinc-400">
-          <span className="shrink-0">Workflow</span>
-          <select
-            className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-zinc-200 focus:border-violet-500 focus:outline-none"
-            aria-label="Filter workflow execution board"
-            value={workflowFilter}
-            onChange={(event) => setWorkflowFilter(event.target.value)}
-          >
-            <option value="all">Semua workflow</option>
-            <option value="standard">Standard Delivery</option>
-            <option value="quick">Quick Task</option>
-          </select>
-        </label>
       </div>
 
       {viewMode === "kanban" ? (
-        <div className="space-y-7">
-          {workflowFilter !== "standard" && (
-            <WorkflowBoardGrid
-              title="Quick Task"
-              description="Jalur singkat untuk revisi kecil dan pekerjaan teknis: Intake → In Progress → Validation → Done."
-              tasks={quickTasks}
-              statuses={QUICK_STATUSES}
-              clients={CLIENTS}
-              activePic={activePic}
-              pulseId={pulseId}
-              rowRefs={rowRefs}
-              onOpenTask={setSelectedTask}
-              onMoveTask={moveTask}
-              canMove={can("update", "tasks")}
-            />
-          )}
-          {workflowFilter !== "quick" && (
-            <WorkflowBoardGrid
-              title="Standard Delivery"
-              description="Workflow lengkap untuk pekerjaan build dan optimize lintas tahap."
-              tasks={standardTasks}
-              statuses={STANDARD_STATUSES}
-              clients={CLIENTS}
-              activePic={activePic}
-              pulseId={pulseId}
-              rowRefs={rowRefs}
-              onOpenTask={setSelectedTask}
-              onMoveTask={moveTask}
-              canMove={can("update", "tasks")}
-            />
-          )}
-        </div>
+        <WorkflowBoardGrid
+          title="Task Board"
+          description="Build, Optimization, dan Quick memakai status yang sama agar board mudah dipahami."
+          tasks={boardTasks}
+          statuses={STATUSES}
+          clients={CLIENTS}
+          activePic={null}
+          pulseId={pulseId}
+          rowRefs={rowRefs}
+          onOpenTask={setSelectedTask}
+          onAddTask={can("create", "tasks") ? (client) => openEditor("tasks", null, { client }) : null}
+          onMoveTask={moveTask}
+          canMove={can("update", "tasks")}
+        />
       ) : (
         <CalendarView
+          tasks={scopedTasks}
           activePic={activePic}
-          workflowFilter={workflowFilter}
           onOpenTask={setSelectedTask}
         />
       )}
@@ -2455,7 +2443,6 @@ function MacroTable({ onSelectClient }) {
             <th className="p-3 font-medium">Cycle</th>
             <th className="p-3 font-medium">Macro Phase</th>
             <th className="p-3 font-medium">Health</th>
-            <th className="p-3 font-medium">Revision</th>
             <th className="p-3 font-medium">Bottleneck</th>
             <th className="p-3" />
           </tr>
@@ -2466,7 +2453,7 @@ function MacroTable({ onSelectClient }) {
               key={c.id}
               onClick={() => onSelectClient && onSelectClient(c.id)}
               className="cursor-pointer border-b border-zinc-900 last:border-0 hover:bg-zinc-900"
-              title="Lihat swimlane client ini di Execution Board"
+              title="Lihat baris client ini di Task Board"
             >
               <td className="p-3 font-medium text-zinc-100">{c.name}</td>
               <td className="p-3 text-zinc-400">{c.contract}</td>
@@ -2476,9 +2463,6 @@ function MacroTable({ onSelectClient }) {
               <td className="p-3 text-zinc-400">{c.phase}</td>
               <td className="p-3">
                 <HealthBadge health={c.health} />
-              </td>
-              <td className="p-3">
-                <RevisionBadge revision={c.revision} />
               </td>
               <td
                 className="truncate p-3 text-zinc-500"
@@ -2503,7 +2487,7 @@ function MacroTable({ onSelectClient }) {
 function StatusDonut() {
   const { TASKS } = useOps();
   const openTasks = TASKS.filter((t) => t.status !== "done");
-  const data = ALL_STATUSES.filter((s) => s.id !== "done")
+  const data = STATUSES.filter((s) => s.id !== "done")
     .map((s) => {
       const items = openTasks.filter((t) => t.status === s.id);
       return {
@@ -2689,7 +2673,7 @@ function AtRiskList({ filter, onClearFilter }) {
   let items = TASKS.filter(
     (t) =>
       t.status !== "done" &&
-      (t.blocked || t.revision >= 3 || t.status === "review" || isOverdue(t)),
+      (t.blocked || t.status === "review" || isOverdue(t)),
   );
   if (filter === "overdue") items = items.filter(isOverdue);
   if (filter === "review") items = items.filter((t) => t.status === "review");
@@ -2748,7 +2732,6 @@ function AtRiskList({ filter, onClearFilter }) {
                       Client Review
                     </span>
                   )}
-                  {t.revision >= 3 && <RevisionBadge revision={t.revision} />}
                   <PicGroup task={t} />
                   <span
                     className="tabular-nums"
@@ -2775,16 +2758,10 @@ function DeliveryReport({ tasks }) {
   const [mode, setMode] = useState("weekly");
   const [anchor, setAnchor] = useState(todayISO());
   const report = taskDeliveryReport(tasks, anchor, mode);
-  const standardReport = taskDeliveryReport(
-    tasks.filter((task) => (task.workflow || "standard") === "standard"),
-    anchor,
-    mode,
-  );
-  const quickReport = taskDeliveryReport(
-    tasks.filter((task) => task.workflow === "quick"),
-    anchor,
-    mode,
-  );
+  const workTypeReports = Object.keys(WORKFLOW_META).map((workflow) => ({
+    workflow,
+    ...taskDeliveryReport(tasks.filter((task) => task.workflow === workflow), anchor, mode),
+  }));
   const roleRows = Object.keys(PIC)
     .map((role) => ({
       role,
@@ -2852,12 +2829,11 @@ function DeliveryReport({ tasks }) {
       />
       <p className="mb-4 text-sm font-medium text-violet-300">{periodLabel}</p>
       <div className="mb-4 flex flex-wrap gap-2 text-xs">
-        <span className="rounded-full border border-violet-500/30 bg-violet-500/10 px-3 py-1.5 text-violet-200">
-          Standard Delivery: {standardReport.done}/{standardReport.total} done
-        </span>
-        <span className="rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-sky-200">
-          Quick Task: {quickReport.done}/{quickReport.total} done
-        </span>
+        {workTypeReports.map((item) => (
+          <span key={item.workflow} className="rounded-full px-3 py-1.5" style={pillStyle(WORKFLOW_META[item.workflow].color)}>
+            {WORKFLOW_META[item.workflow].label}: {item.done}/{item.total} done
+          </span>
+        ))}
       </div>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <KpiCard
@@ -4382,7 +4358,7 @@ const derive = (compute) => compute();
 const OpsContext = createContext(null);
 const ROLE_IDS = Object.keys(PIC);
 const TAB_META = [
-  { id: "board", label: "Execution Board", icon: LayoutGrid },
+  { id: "board", label: "Task Board", icon: LayoutGrid },
   { id: "hub", label: "Operations Hub", icon: LayoutDashboard },
   { id: "kpi", label: "Client Performance KPI", icon: TrendingUp },
   { id: "team", label: "Team Performance KPI", icon: Users },
@@ -4532,7 +4508,7 @@ export function saveRecord(data, kind, input) {
   if (kind === "tasks") {
     requireText(record.name, "Judul task");
     validDate(record.due, "Deadline");
-    record.workflow ||= "standard";
+    record.workflow ||= "build";
     record.pics = [
       ...new Set(
         (Array.isArray(record.pics) ? record.pics : [record.pic]).filter(
@@ -4543,19 +4519,18 @@ export function saveRecord(data, kind, input) {
     record.pic = record.pics[0];
     if (
       !WORKFLOW_META[record.workflow] ||
-      !statusesForWorkflow(record.workflow).some(
-        (status) => status.id === record.status,
-      ) ||
+      !STATUSES.some((status) => status.id === record.status) ||
       record.pics.length === 0
     )
       throw new Error("Status atau role task tidak valid.");
-    if (
-      !["normal", "urgent"].includes(record.priority) ||
-      !["feature", "hotfix"].includes(record.type)
-    )
-      throw new Error("Priority atau tipe tidak valid.");
+    if (!["normal", "urgent"].includes(record.priority))
+      throw new Error("Priority tidak valid.");
     numberCheck(record.cycle, "Cycle delivery", 999, true);
-    numberCheck(record.revision, "Revisi", Infinity, true);
+    record.checklist = (record.checklist || []).map((item) => ({
+      ...(item.id ? { id: item.id } : {}),
+      label: String(item.label || "").trim(),
+      completed: !!item.completed,
+    })).filter((item) => item.label);
     record.createdAt = existing?.createdAt || record.createdAt || todayISO();
     if (record.status === "done") {
       record.completedAt =
@@ -4717,7 +4692,6 @@ export function deliveryClients(data) {
           .filter((c) => c.client === client.id)
           .map((c) => c.cycle),
       ),
-      revision: Math.max(0, ...tasks.map((t) => t.revision)),
       notes: client.bottleneck || "",
       bottleneck: focus && (blocked || overdue || review) ? focus.name : "—",
     };
@@ -4872,6 +4846,18 @@ function OpsProvider({
     );
   }
 
+  async function toggleChecklist(taskId, itemId, completed) {
+    if (!can("update", "tasks")) accessDenied();
+    await inertiaMutation(`/tasks/${taskId}/checklist/${itemId}`, "patch", { completed });
+    setNotice("Checklist task diperbarui.");
+  }
+
+  async function saveTaskChecklist(taskId, checklist) {
+    if (!can("update", "tasks")) accessDenied();
+    await inertiaMutation(`/tasks/${taskId}/checklist`, "patch", { checklist });
+    setNotice("Susunan checklist berhasil diperbarui.");
+  }
+
   async function teamDispatch(command) {
     if (command.type === "save") {
       if (!can("submit", "team-reports")) accessDenied();
@@ -4992,12 +4978,14 @@ function OpsProvider({
     saveFeedbackAction,
     remove,
     moveTask,
+    toggleChecklist,
+    saveTaskChecklist,
     saveRolePermissions,
   };
   return <OpsContext.Provider value={value}>{children}</OpsContext.Provider>;
 }
 
-function Modal({ title, onClose, children }) {
+function Modal({ title, onClose, children, className = "" }) {
   const ref = useRef(null);
   useEffect(() => {
     const d = ref.current;
@@ -5010,7 +4998,7 @@ function Modal({ title, onClose, children }) {
   }, []);
   return (
     <dialog
-      className="ops-dialog"
+      className={`ops-dialog ${className}`}
       ref={ref}
       aria-labelledby="ops-dialog-title"
       onCancel={(e) => {
@@ -5123,15 +5111,14 @@ function defaultRecord(kind, data, preset = {}) {
     tasks: {
       name: "",
       client,
-      workflow: "standard",
+      workflow: "build",
       status: "intake",
       pic: "project-manager",
       pics: ["project-manager"],
       due: todayISO(),
       cycle: 0,
-      revision: 0,
       priority: "normal",
-      type: "feature",
+      checklist: checklistFor("build"),
       brief: "",
       blocked: false,
       createdAt: todayISO(),
@@ -5274,20 +5261,25 @@ function RoleMultiSelect({ value, onChange }) {
   };
 
   return (
-    <fieldset className="sm:col-span-2">
-      <legend className="mb-2 text-sm text-zinc-300">
-        PIC / pihak terlibat <span className="text-rose-300">*</span>
-      </legend>
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+    <fieldset>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <legend className="text-sm font-medium text-zinc-200">
+          Pilih PIC <span className="text-rose-300">*</span>
+        </legend>
+        <span className="rounded-full bg-zinc-800 px-2.5 py-1 text-xs text-zinc-400">
+          {selected.length} role dipilih
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         {Object.entries(PIC).map(([role, person]) => {
           const active = selected.includes(role);
           return (
             <label
               key={role}
-              className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors ${
+              className={`task-assignee-option cursor-pointer items-center gap-2 rounded-lg border px-3 py-2.5 transition-colors ${
                 active
-                  ? "border-violet-500 bg-violet-500/10 text-zinc-100"
-                  : "border-zinc-800 bg-zinc-900 text-zinc-400"
+                  ? "border-violet-500 bg-violet-500/10 text-zinc-100 shadow-[inset_0_0_0_1px_rgba(139,92,246,0.12)]"
+                  : "border-zinc-800 bg-zinc-950/70 text-zinc-400 hover:border-zinc-700"
               }`}
             >
               <input
@@ -5296,14 +5288,13 @@ function RoleMultiSelect({ value, onChange }) {
                 onChange={() => toggle(role)}
               />
               <PicChip id={role} />
-              <span>{person.name}</span>
+              <span className="min-w-0 truncate text-sm">{person.name}</span>
             </label>
           );
         })}
       </div>
       <p className="mt-2 text-xs text-zinc-500">
-        Pilih minimal satu role. Task akan masuk ke workload dan filter setiap
-        role yang dipilih.
+        Task akan muncul pada workload setiap role yang dipilih.
       </p>
     </fieldset>
   );
@@ -5314,12 +5305,14 @@ function RecordEditor({ kind, record, preset, onClose }) {
   const [draft, setDraft] = useState(() => {
       const initial = clone(record || defaultRecord(kind, data, preset));
       if (kind === "tasks") {
-        initial.workflow ||= "standard";
+        initial.workflow ||= "build";
         initial.pics = taskPics(initial);
+        initial.checklist ||= checklistFor(initial.workflow);
       }
       return initial;
     }),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [saving, setSaving] = useState(false);
   const set = (key, value) => setDraft((d) => ({ ...d, [key]: value }));
   const field = (key, label, type = "text", extra = {}) => (
     <InputField
@@ -5338,19 +5331,31 @@ function RecordEditor({ kind, record, preset, onClose }) {
     });
   async function submit(e) {
     e.preventDefault();
+    if (saving) return;
+    setError("");
+    setSaving(true);
     try {
       await save(kind, draft);
     } catch (e) {
       setError(e.message);
+      setSaving(false);
     }
   }
   return (
     <Modal
       title={`${record ? "Edit" : "Tambah"} ${KIND_LABEL[kind]}`}
       onClose={onClose}
+      className={kind === "tasks" ? "ops-dialog-task" : ""}
     >
-      <form onSubmit={submit}>
-        <div className="grid gap-4 sm:grid-cols-2">
+      <form
+        onSubmit={submit}
+        className={kind === "tasks" ? "task-editor-form" : ""}
+      >
+        <div
+          className={
+            kind === "tasks" ? "space-y-5" : "grid gap-4 sm:grid-cols-2"
+          }
+        >
           {kind === "clients" && (
             <>
               {field("name", "Nama client", "text", { required: true })}
@@ -5359,8 +5364,7 @@ function RecordEditor({ kind, record, preset, onClose }) {
                 {field("bottleneck", "Catatan operasional", "textarea")}
               </div>
               <p className="text-sm text-zinc-400 sm:col-span-2">
-                Health, tahap, revisi, dan progress dihitung otomatis dari
-                Execution Board.
+                Health, tahap, dan progress dihitung otomatis dari Task Board.
               </p>
             </>
           )}
@@ -5396,75 +5400,161 @@ function RecordEditor({ kind, record, preset, onClose }) {
           )}
           {kind === "tasks" && (
             <>
-              {field("name", "Judul task", "text", { required: true })}
-              {clientField()}
-              <label>
-                Workflow
-                <select
-                  value={draft.workflow || "standard"}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      workflow: event.target.value,
-                      status: "intake",
-                    }))
-                  }
-                >
-                  {Object.entries(WORKFLOW_META).map(([value, meta]) => (
-                    <option key={value} value={value}>
-                      {meta.label}
-                    </option>
-                  ))}
-                </select>
-                <span className="text-xs text-zinc-500">
-                  {WORKFLOW_META[draft.workflow || "standard"].description}
-                </span>
-              </label>
-              {field("status", "Status", "text", {
-                options: statusesForWorkflow(draft.workflow).map((status) => ({
-                  value: status.id,
-                  label: status.label,
-                })),
-              })}
-              <RoleMultiSelect
-                value={draft.pics}
-                onChange={(roles) => set("pics", roles)}
-              />
-              {field("due", "Deadline", "date", { required: true })}
-              {field("cycle", "Cycle delivery", "number", {
-                required: true,
-                min: 0,
-                max: 999,
-                step: 1,
-              })}
-              {field("revision", "Jumlah revisi", "number", {
-                required: true,
-                min: 0,
-                step: 1,
-              })}
-              {field("priority", "Priority", "text", {
-                options: [
-                  { value: "normal", label: "Normal" },
-                  { value: "urgent", label: "Urgent" },
-                ],
-              })}
-              {field("type", "Tipe task", "text", {
-                options: [
-                  { value: "feature", label: "Feature" },
-                  { value: "hotfix", label: "Hotfix" },
-                ],
-              })}
-              <label className="ops-inline-label">
-                <input
-                  type="checkbox"
-                  checked={!!draft.blocked}
-                  onChange={(e) => set("blocked", e.target.checked)}
+              <section className="task-form-section">
+                <div className="task-form-section-heading">
+                  <span className="task-form-step">1</span>
+                  <div>
+                    <h3>Informasi task</h3>
+                    <p>Tentukan pekerjaan, client, dan batas waktunya.</p>
+                  </div>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="sm:col-span-2">
+                    <span>
+                      Judul task <span className="text-rose-300">*</span>
+                    </span>
+                    <input
+                      autoFocus
+                      type="text"
+                      value={draft.name}
+                      onChange={(event) => set("name", event.target.value)}
+                      placeholder="Contoh: Optimasi loading landing page"
+                      required
+                    />
+                  </label>
+                  {clientField()}
+                  {field("due", "Deadline", "date", { required: true })}
+                  <div className="sm:col-span-2">
+                    {field("brief", "Brief / detail task (opsional)", "textarea")}
+                  </div>
+                </div>
+              </section>
+
+              <section className="task-form-section">
+                <div className="task-form-section-heading">
+                  <span className="task-form-step">2</span>
+                  <div>
+                    <h3>Jenis pekerjaan</h3>
+                    <p>Pilih kategori yang paling sesuai. Semua kategori memakai status yang sama.</p>
+                  </div>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {Object.entries(WORKFLOW_META).map(([value, meta]) => {
+                    const selected = (draft.workflow || "build") === value;
+                    const Icon = value === "quick" ? Zap : value === "optimization" ? TrendingUp : LayoutGrid;
+                    return (
+                      <label
+                        key={value}
+                        className={`task-workflow-option cursor-pointer ${
+                          selected ? "task-workflow-option-active" : ""
+                        }`}
+                      >
+                        <input
+                          className="sr-only"
+                          type="radio"
+                          name="task-workflow"
+                          value={value}
+                          checked={selected}
+                          onChange={() =>
+                            setDraft((current) => ({
+                              ...current,
+                              workflow: value,
+                              status: "intake",
+                              checklist: checklistFor(value),
+                            }))
+                          }
+                        />
+                        <span className="task-workflow-icon">
+                          <Icon className="h-4 w-4" />
+                        </span>
+                        <span className="min-w-0">
+                          <strong>{meta.label}</strong>
+                          <small>{meta.description}</small>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                {record && (
+                  <div className="mt-4 max-w-sm">
+                    {field("status", "Status", "text", { options: STATUSES.map((status) => ({ value: status.id, label: status.label })) })}
+                  </div>
+                )}
+                <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-950/50 p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-zinc-200">Checklist proses</p>
+                      <p className="mt-1 text-xs text-zinc-500">Langkah kerja otomatis sesuai jenis pekerjaan dan dapat disesuaikan.</p>
+                    </div>
+                    <button type="button" className="ops-button" onClick={() => set("checklist", [...(draft.checklist || []), { label: "", completed: false }])}>+ Langkah</button>
+                  </div>
+                  {draft.checklist?.length ? (
+                    <div className="space-y-2">
+                      {draft.checklist.map((item, index) => (
+                        <div key={item.id || index} className="flex items-center gap-2">
+                          <input className="min-w-0 flex-1" value={item.label} placeholder={`Langkah ${index + 1}`} onChange={(event) => set("checklist", draft.checklist.map((entry, itemIndex) => itemIndex === index ? { ...entry, label: event.target.value } : entry))} />
+                          <button type="button" className="ops-button ops-danger" aria-label={`Hapus langkah ${index + 1}`} onClick={() => set("checklist", draft.checklist.filter((_, itemIndex) => itemIndex !== index))}>×</button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-zinc-500">Quick task tidak memiliki checklist bawaan. Tambahkan langkah jika dibutuhkan.</p>
+                  )}
+                </div>
+              </section>
+
+              <section className="task-form-section">
+                <div className="task-form-section-heading">
+                  <span className="task-form-step">3</span>
+                  <div>
+                    <h3>Penugasan</h3>
+                    <p>Satu task dapat melibatkan beberapa role sekaligus.</p>
+                  </div>
+                </div>
+                <RoleMultiSelect
+                  value={draft.pics}
+                  onChange={(roles) => set("pics", roles)}
                 />
-                Task terhambat (Blocked)
-              </label>
-              <div className="sm:col-span-2">
-                {field("brief", "Brief / detail task", "textarea")}
-              </div>
+              </section>
+
+              <section className="task-form-section">
+                <div className="task-form-section-heading">
+                  <span className="task-form-step">4</span>
+                  <div>
+                    <h3>Pengaturan tambahan</h3>
+                    <p>Atur prioritas, cycle, dan kondisi blocker bila diperlukan.</p>
+                  </div>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {field("priority", "Priority", "text", {
+                    options: [
+                      { value: "normal", label: "Normal" },
+                      { value: "urgent", label: "Urgent" },
+                    ],
+                  })}
+                  {field("cycle", "Cycle", "number", {
+                    required: true,
+                    min: 0,
+                    max: 999,
+                    step: 1,
+                  })}
+                  <label className="task-blocked-toggle sm:col-span-2">
+                    <input
+                      type="checkbox"
+                      checked={!!draft.blocked}
+                      onChange={(event) =>
+                        set("blocked", event.target.checked)
+                      }
+                    />
+                    <span>
+                      <strong>Task sedang terhambat</strong>
+                      <small>
+                        Aktifkan jika task belum dapat dikerjakan karena blocker.
+                      </small>
+                    </span>
+                  </label>
+                </div>
+              </section>
             </>
           )}
           {kind === "feedback" && (
@@ -5678,12 +5768,28 @@ function RecordEditor({ kind, record, preset, onClose }) {
             {error}
           </p>
         )}
-        <footer className="mt-6 flex justify-end gap-2 border-t border-zinc-800 pt-5">
+        <footer
+          className={
+            kind === "tasks"
+              ? "task-editor-footer"
+              : "mt-6 flex justify-end gap-2 border-t border-zinc-800 pt-5"
+          }
+        >
+          {kind === "tasks" && (
+            <p className="mr-auto text-xs text-zinc-500">
+              Kolom dengan tanda <span className="text-rose-300">*</span> wajib
+              diisi.
+            </p>
+          )}
           <button type="button" className="ops-button" onClick={onClose}>
             Batal
           </button>
-          <button type="submit" className="ops-button ops-primary">
-            Simpan {KIND_LABEL[kind]}
+          <button
+            type="submit"
+            className="ops-button ops-primary min-w-32"
+            disabled={saving}
+          >
+            {saving ? "Menyimpan…" : `Simpan ${KIND_LABEL[kind]}`}
           </button>
         </footer>
       </form>
@@ -6481,7 +6587,7 @@ function AppShell() {
 }
 
 const APP_CSS =
-  ".pbm-prototype { color-scheme: dark; font-family: Inter, system-ui, sans-serif; background: #09090b; }\nbutton,select { cursor:pointer; }\nbutton:disabled { cursor:not-allowed; opacity:.45; }\ninput,select,textarea { color-scheme:dark; }\nbutton:focus-visible,a:focus-visible { outline:2px solid #a78bfa; outline-offset:3px; }\n.ops-dialog::backdrop { background:rgb(0 0 0 / .76); backdrop-filter:blur(4px); }\n.ops-dialog { margin:auto; max-height:90dvh; width:min(850px,calc(100% - 24px)); overflow:auto; border:1px solid #3f3f46; border-radius:20px; padding:24px; background:#09090b; color:#f4f4f5; }\n.ops-dialog input:not([type=radio]):not([type=checkbox]),.ops-dialog select,.ops-dialog textarea,.login-input { width:100%; background:#18181b; border:1px solid #3f3f46; border-radius:8px; padding:10px 12px; color:#f4f4f5; }\n.ops-dialog label { display:grid; gap:7px; font-size:14px; color:#d4d4d8; }\n.ops-dialog textarea { min-height:88px; resize:vertical; }\n.ops-button { display:inline-flex; align-items:center; justify-content:center; gap:6px; border:1px solid #3f3f46; border-radius:8px; padding:8px 12px; font-size:14px; background:#18181b; color:#e4e4e7; }\n.ops-button:hover { background:#27272a; }\n.ops-primary { background:#4f39f6; border-color:#4f39f6; color:white; }\n.ops-primary:hover { background:#634efb; }\n.ops-danger { color:#fda4af; border-color:#9f1239; }\n.ops-empty { padding:32px; border:1px dashed #3f3f46; border-radius:12px; color:#a1a1aa; text-align:center; }\n@media(max-width:640px) { main { padding:20px 12px !important; } .ops-dialog { padding:18px; } }\n.ops-dialog label.ops-inline-label { display:flex; align-items:center; gap:8px; }\n";
+  ".pbm-prototype { color-scheme: dark; font-family: Inter, system-ui, sans-serif; background: #09090b; }\nbutton,select { cursor:pointer; }\nbutton:disabled { cursor:not-allowed; opacity:.45; }\ninput,select,textarea { color-scheme:dark; }\nbutton:focus-visible,a:focus-visible { outline:2px solid #a78bfa; outline-offset:3px; }\n.ops-dialog::backdrop { background:rgb(0 0 0 / .76); backdrop-filter:blur(4px); }\n.ops-dialog { margin:auto; max-height:90dvh; width:min(850px,calc(100% - 24px)); overflow:auto; border:1px solid #3f3f46; border-radius:20px; padding:24px; background:#09090b; color:#f4f4f5; }\n.ops-dialog input:not([type=radio]):not([type=checkbox]),.ops-dialog select,.ops-dialog textarea,.login-input { width:100%; background:#18181b; border:1px solid #3f3f46; border-radius:8px; padding:10px 12px; color:#f4f4f5; }\n.ops-dialog input:focus,.ops-dialog select:focus,.ops-dialog textarea:focus { border-color:#7c3aed; outline:none; box-shadow:0 0 0 3px rgb(124 58 237 / .13); }\n.ops-dialog label { display:grid; gap:7px; font-size:14px; color:#d4d4d8; }\n.ops-dialog textarea { min-height:88px; resize:vertical; }\n.ops-button { display:inline-flex; align-items:center; justify-content:center; gap:6px; border:1px solid #3f3f46; border-radius:8px; padding:8px 12px; font-size:14px; background:#18181b; color:#e4e4e7; }\n.ops-button:hover { background:#27272a; }\n.ops-primary { background:#4f39f6; border-color:#4f39f6; color:white; }\n.ops-primary:hover { background:#634efb; }\n.ops-danger { color:#fda4af; border-color:#9f1239; }\n.ops-empty { padding:32px; border:1px dashed #3f3f46; border-radius:12px; color:#a1a1aa; text-align:center; }\n.ops-dialog label.ops-inline-label { display:flex; align-items:center; gap:8px; }\n.ops-dialog-task { width:min(980px,calc(100% - 24px)); padding:0; overflow:hidden; }\n.ops-dialog-task>header { margin:0; padding:20px 24px; border-bottom:1px solid #27272a; background:#0c0c0f; }\n.task-editor-form { max-height:calc(90dvh - 73px); overflow-y:auto; padding:20px 24px 0; }\n.task-form-section { border:1px solid #27272a; border-radius:14px; background:rgb(24 24 27 / .55); padding:18px; }\n.task-form-section-heading { display:flex; align-items:flex-start; gap:11px; margin-bottom:16px; }\n.task-form-section-heading h3 { color:#f4f4f5; font-size:15px; font-weight:600; line-height:1.35; }\n.task-form-section-heading p { margin-top:2px; color:#71717a; font-size:12px; line-height:1.5; }\n.task-form-step { display:inline-flex; width:24px; height:24px; flex:0 0 24px; align-items:center; justify-content:center; border-radius:999px; background:rgb(124 58 237 / .16); color:#c4b5fd; font-size:11px; font-weight:700; }\n.task-workflow-option { display:flex !important; min-height:76px; grid-template-columns:none !important; align-items:center; gap:12px !important; border:1px solid #3f3f46; border-radius:10px; background:#111114; padding:13px; transition:.16s ease; }\n.task-workflow-option:hover { border-color:#52525b; background:#18181b; }\n.task-workflow-option-active { border-color:#7c3aed; background:rgb(124 58 237 / .1); box-shadow:inset 0 0 0 1px rgb(124 58 237 / .16); }\n.task-workflow-icon { display:inline-flex; width:34px; height:34px; flex:0 0 34px; align-items:center; justify-content:center; border-radius:9px; background:#27272a; color:#c4b5fd; }\n.task-workflow-option strong,.task-workflow-option small,.task-blocked-toggle strong,.task-blocked-toggle small { display:block; }\n.task-workflow-option strong { color:#f4f4f5; font-size:13px; }\n.task-workflow-option small { margin-top:3px; color:#71717a; font-size:11px; line-height:1.35; }\n.task-assignee-option { display:flex !important; grid-template-columns:none !important; }\n.task-blocked-toggle { display:flex !important; grid-template-columns:none !important; align-items:flex-start; gap:10px !important; border:1px solid #3f3f46; border-radius:10px; background:#111114; padding:12px 14px; }\n.task-blocked-toggle input { margin-top:3px; }\n.task-blocked-toggle strong { color:#e4e4e7; font-size:13px; }\n.task-blocked-toggle small { margin-top:2px; color:#71717a; font-size:11px; }\n.task-editor-footer { position:sticky; bottom:0; z-index:5; display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:8px; margin:24px -24px 0; border-top:1px solid #27272a; background:rgb(9 9 11 / .96); padding:15px 24px; backdrop-filter:blur(10px); }\n.ops-dialog-task-detail { width:min(760px,calc(100% - 24px)); }\n.task-detail-meta-row { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; margin-top:-6px; margin-bottom:18px; }\n.task-detail-summary-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px; }\n.task-detail-summary-card,.task-detail-section { border:1px solid #27272a; border-radius:12px; background:rgb(24 24 27 / .55); padding:15px; }\n.task-detail-section { margin-top:14px; }\n.task-detail-label { color:#71717a; font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; }\n.task-checklist-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }\n.task-checklist-list { overflow:hidden; border:1px solid #27272a; border-radius:10px; }\n.task-checklist-view-row { display:flex; align-items:center; gap:10px; min-height:44px; padding:9px 11px; border-bottom:1px solid #27272a; background:#111114; }\n.task-checklist-view-row:last-child { border-bottom:0; }\n.task-checklist-view-row input[type=checkbox],.task-checklist-edit-row input[type=checkbox] { width:16px; height:16px; flex:0 0 16px; accent-color:#34d399; }\n.task-checklist-number { display:flex; width:22px; height:22px; flex:0 0 22px; align-items:center; justify-content:center; border-radius:999px; background:#27272a; color:#a1a1aa; font-size:10px; font-weight:600; }\n.task-checklist-edit-row { display:grid; grid-template-columns:18px 1fr auto; align-items:center; gap:10px; }\n@media(max-width:640px) { main { padding:20px 12px !important; } .ops-dialog { padding:18px; } .ops-dialog-task { width:calc(100% - 12px); max-height:96dvh; padding:0; border-radius:16px; } .ops-dialog-task>header { padding:16px; } .task-editor-form { max-height:calc(96dvh - 65px); padding:16px 16px 0; } .task-form-section { padding:14px; } .task-editor-footer { margin:20px -16px 0; padding:12px 16px; } .task-editor-footer p { width:100%; } .task-detail-summary-grid { grid-template-columns:1fr; } .task-detail-meta-row { align-items:flex-start; } .task-checklist-view-row { padding:9px; } .task-checklist-edit-row { grid-template-columns:18px 1fr; } .task-checklist-edit-row .ops-danger { grid-column:2; justify-self:start; } }\n";
 export default function App({
   authUser,
   serverUsers,
