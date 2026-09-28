@@ -18,9 +18,10 @@ enum UserRole: string
     public function defaultTabs(): array
     {
         return match ($this) {
-            self::COO, self::ProjectManager => ['board', 'hub', 'kpi', 'team', 'feedback', 'clients', 'users'],
+            self::COO, self::ProjectManager => ['board', 'hub', 'kpi', 'ads', 'team', 'feedback', 'clients', 'users'],
             self::Developer, self::Creative => ['board', 'team', 'feedback'],
-            self::DigitalMarketer, self::CMO => ['board', 'kpi', 'team', 'feedback'],
+            self::DigitalMarketer, self::CMO => ['board', 'kpi', 'ads', 'team', 'feedback'],
+            self::MarketingManager => ['board', 'ads', 'team', 'feedback'],
             default => ['board', 'team', 'feedback'],
         };
     }

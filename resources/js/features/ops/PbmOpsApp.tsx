@@ -1,6 +1,7 @@
 // @ts-nocheck -- faithful port of the approved interactive MVP; typed Inertia props live at the page boundary.
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import TeamPerformance, { createTeamSeed } from "./TeamPerformance";
+import MetaAdsPerformance from "./MetaAdsPerformance";
 import { router } from "@inertiajs/react";
 import {
   LayoutDashboard,
@@ -4361,6 +4362,7 @@ const TAB_META = [
   { id: "board", label: "Task Board", icon: LayoutGrid },
   { id: "hub", label: "Operations Hub", icon: LayoutDashboard },
   { id: "kpi", label: "Client Performance KPI", icon: TrendingUp },
+  { id: "ads", label: "Meta Ads", icon: TrendingUp },
   { id: "team", label: "Team Performance KPI", icon: Users },
   { id: "feedback", label: "Feedback Loop", icon: MessageSquare },
   { id: "clients", label: "Clients", icon: Users },
@@ -6566,6 +6568,7 @@ function AppShell() {
           <ExecutiveHub onGoToClient={goToClient} />
         )}
         {tab === "kpi" && can("view", "kpi") && <KpiDashboard />}
+        {tab === "ads" && can("view", "ads") && <MetaAdsPerformance />}
         {tab === "team" && (
           <TeamPerformance
             team={data.team}
