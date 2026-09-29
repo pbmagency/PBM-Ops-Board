@@ -113,6 +113,17 @@ class OperationalCrudTest extends TestCase
         $this->assertSame('quick', $task->workflow);
         $this->assertCount(2, $task->assignees);
 
+        $developer = User::where('email', 'developer@gmail.com')->firstOrFail();
+        $this->actingAs($developer)
+            ->patch("/tasks/{$task->id}/status", ['status' => 'done'])
+            ->assertRedirect();
+        $this->assertDatabaseHas('tasks', ['id' => $task->id, 'status' => 'done']);
+
+        $cmo = User::where('email', 'cmo@gmail.com')->firstOrFail();
+        $this->actingAs($cmo)
+            ->patch("/tasks/{$task->id}/status", ['status' => 'in-progress'])
+            ->assertForbidden();
+
         $this->actingAs($coo)
             ->patch("/tasks/{$task->id}/status", ['status' => 'review'])
             ->assertRedirect();
@@ -130,24 +141,33 @@ class OperationalCrudTest extends TestCase
 
         $item = $buildTask->checklistItems->first();
         $this->actingAs($coo)
-            ->patch("/tasks/{$buildTask->id}/checklist/{$item->id}", ['completed' => true])
+            ->patch("/tasks/{$buildTask->id}/checklist/{$item->id}/status", ['completed' => true])
             ->assertRedirect();
         $this->assertDatabaseHas('task_checklist_items', ['id' => $item->id, 'completed' => true]);
+        $this->assertNotNull($item->fresh()->completed_at);
 
-        $this->actingAs($coo)->patch("/tasks/{$buildTask->id}/checklist", [
+        $this->actingAs($coo)->put("/tasks/{$buildTask->id}/checklist", [
             'checklist' => [
-                ['label' => 'Brief approved', 'completed' => true],
-                ['label' => 'Build selesai', 'completed' => false],
+                ['id' => $item->id, 'label' => 'Brief approved', 'picRole' => 'developer', 'due' => '2026-09-18', 'completed' => true],
+                ['label' => 'Build selesai', 'picRole' => 'creative', 'due' => '2026-09-19', 'completed' => false],
             ],
         ])->assertRedirect();
         $this->assertDatabaseCount('task_checklist_items', 2);
-        $this->assertDatabaseHas('task_checklist_items', ['task_id' => $buildTask->id, 'label' => 'Brief approved']);
+        $this->assertDatabaseHas('task_checklist_items', ['id' => $item->id, 'task_id' => $buildTask->id, 'label' => 'Brief approved', 'pic_role' => 'developer']);
 
-        $developer = User::where('email', 'developer@gmail.com')->firstOrFail();
-        $replacementItem = $buildTask->checklistItems()->firstOrFail();
         $this->actingAs($developer)
-            ->patch("/tasks/{$buildTask->id}/checklist/{$replacementItem->id}", ['completed' => false])
+            ->patch("/tasks/{$buildTask->id}/checklist/{$item->id}/status", ['completed' => false])
+            ->assertRedirect();
+        $this->assertNull($item->fresh()->completed_at);
+
+        $creativeItem = $buildTask->checklistItems()->where('pic_role', 'creative')->firstOrFail();
+        $this->actingAs($developer)
+            ->patch("/tasks/{$buildTask->id}/checklist/{$creativeItem->id}/status", ['completed' => true])
             ->assertForbidden();
+
+        $this->actingAs($developer)->put("/tasks/{$buildTask->id}/checklist", [
+            'checklist' => [['id' => $item->id, 'label' => 'Tidak boleh', 'picRole' => 'developer', 'due' => '2026-09-18', 'completed' => false]],
+        ])->assertForbidden();
     }
 
     private function taskPayload(string $client, string $name = 'Database Task'): array

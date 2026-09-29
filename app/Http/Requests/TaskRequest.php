@@ -28,8 +28,13 @@ class TaskRequest extends FormRequest
             'brief' => ['nullable', 'string', 'max:20000'],
             'blocked' => ['required', 'boolean'],
             'checklist' => ['sometimes', 'array', 'max:50'],
+            'checklist.*.id' => ['nullable', 'integer'],
             'checklist.*.label' => ['required', 'string', 'max:255'],
+            'checklist.*.picRole' => ['required', Rule::enum(UserRole::class)],
+            'checklist.*.due' => ['required', 'date_format:Y-m-d'],
+            'checklist.*.dueTime' => ['nullable', 'string', 'regex:/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/'],
             'checklist.*.completed' => ['required', 'boolean'],
+            'checklist.*.position' => ['sometimes', 'integer', 'min:0', 'distinct'],
         ];
     }
 
@@ -38,7 +43,6 @@ class TaskRequest extends FormRequest
         $this->merge([
             'workflow' => $this->input('workflow', 'build'),
             'pics' => $this->input('pics', $this->filled('pic') ? [$this->input('pic')] : []),
-            'checklist' => $this->input('checklist', []),
         ]);
     }
 }

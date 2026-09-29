@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\UserRole;
 use App\Http\Requests\ClientRequest;
 use App\Http\Requests\CycleRequest;
 use App\Http\Requests\FeedbackRequest;
@@ -18,6 +19,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class OperationsController
 {
@@ -51,7 +53,7 @@ class OperationsController
         DB::transaction(function () use ($request) {
             $task = Task::create(['id' => (string) Str::uuid(), ...$this->taskData($request->validated())]);
             $this->syncAssignees($task, $request->validated('pics'));
-            $this->syncChecklist($task, $this->checklistData($request->validated()));
+            $this->syncChecklist($task, $this->checklistData($request->validated(), $request->exists('checklist')));
             $this->recordStatus($task, null, $task->status, $request->user());
         });
 
@@ -65,7 +67,7 @@ class OperationsController
             $before = $task->status;
             $task->update($this->taskData($request->validated(), $task));
             $this->syncAssignees($task, $request->validated('pics'));
-            $this->syncChecklist($task, $this->checklistData($request->validated()));
+            $this->syncChecklist($task, $this->checklistData($request->validated(), $request->exists('checklist')));
             if ($before !== $task->status) {
                 $this->recordStatus($task, $before, $task->status, $request->user());
             }
@@ -76,8 +78,14 @@ class OperationsController
 
     public function updateTaskStatus(Request $request, Task $task): RedirectResponse
     {
-        Gate::authorize('manage-tasks');
         $data = $request->validate(['status' => ['required', Rule::in(['intake', 'in-progress', 'review', 'done'])]]);
+        $user = $request->user();
+        $canManage = $user->hasAbility('tasks.manage');
+        $canCompleteDirectTask = ! $task->checklistItems()->exists()
+            && $task->assignees()->where('role', $user->role->value)->exists()
+            && in_array($data['status'], ['in-progress', 'done'], true);
+        abort_unless($canManage || $canCompleteDirectTask, 403);
+
         DB::transaction(function () use ($request, $task, $data) {
             $before = $task->status;
             if ($before === $data['status']) {
@@ -100,11 +108,14 @@ class OperationsController
 
     public function updateChecklistItem(Request $request, Task $task, TaskChecklistItem $item): RedirectResponse
     {
-        Gate::authorize('manage-tasks');
-        $this->authorizeChecklistManager($request);
         abort_unless($item->task_id === $task->id, 404);
+        $role = $request->user()->role->value;
+        abort_unless(in_array($role, ['coo', 'project-manager'], true) || $item->pic_role === $role, 403);
         $data = $request->validate(['completed' => ['required', 'boolean']]);
-        $item->update($data);
+        $item->update([
+            'completed' => $data['completed'],
+            'completed_at' => $data['completed'] ? ($item->completed_at ?? today()) : null,
+        ]);
 
         return back()->with('success', 'Checklist task berhasil diperbarui.');
     }
@@ -115,8 +126,13 @@ class OperationsController
         $this->authorizeChecklistManager($request);
         $data = $request->validate([
             'checklist' => ['required', 'array', 'max:50'],
+            'checklist.*.id' => ['nullable', 'integer'],
             'checklist.*.label' => ['required', 'string', 'max:255'],
+            'checklist.*.picRole' => ['required', Rule::enum(UserRole::class)],
+            'checklist.*.due' => ['required', 'date_format:Y-m-d'],
+            'checklist.*.dueTime' => ['nullable', 'string', 'regex:/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/'],
             'checklist.*.completed' => ['required', 'boolean'],
+            'checklist.*.position' => ['sometimes', 'integer', 'min:0', 'distinct'],
         ]);
 
         DB::transaction(fn () => $this->syncChecklist($task, array_values($data['checklist'])));
@@ -242,26 +258,47 @@ class OperationsController
         $task->assignees()->createMany(array_map(fn (string $role) => ['role' => $role], array_values(array_unique($roles))));
     }
 
-    /** @param list<array{label: string, completed: bool}> $items */
+    /** @param list<array{id?: int|null, label: string, picRole: string, due: string, completed: bool}> $items */
     private function syncChecklist(Task $task, array $items): void
     {
-        $task->checklistItems()->delete();
-        $task->checklistItems()->createMany(array_map(
-            fn (array $item, int $position) => [
+        $existing = $task->checklistItems()->get()->keyBy('id');
+        $keptIds = [];
+
+        foreach (array_values($items) as $position => $item) {
+            $payload = [
                 'label' => trim($item['label']),
+                'pic_role' => $item['picRole'],
+                'due' => $item['due'],
+                'due_time' => !empty($item['dueTime']) ? substr($item['dueTime'], 0, 5) : null,
                 'completed' => $item['completed'],
+                'completed_at' => $item['completed']
+                    ? (($item['id'] ?? null) && $existing->get($item['id'])?->completed_at
+                        ? $existing->get($item['id'])->completed_at
+                        : today())
+                    : null,
                 'position' => $position,
-            ],
-            $items,
-            array_keys($items),
-        ));
+            ];
+
+            if ($item['id'] ?? null) {
+                $model = $existing->get($item['id']);
+                if (! $model) {
+                    throw ValidationException::withMessages(['checklist' => 'Checklist tidak termasuk dalam task ini.']);
+                }
+                $model->update($payload);
+                $keptIds[] = $model->id;
+            } else {
+                $keptIds[] = $task->checklistItems()->create($payload)->id;
+            }
+        }
+
+        $task->checklistItems()->whereNotIn('id', $keptIds)->delete();
     }
 
-    /** @return list<array{label: string, completed: bool}> */
-    private function checklistData(array $data): array
+    /** @return list<array{label: string, picRole: string, due: string, completed: bool}> */
+    private function checklistData(array $data, bool $provided): array
     {
-        if (($data['checklist'] ?? []) !== []) {
-            return array_values($data['checklist']);
+        if ($provided) {
+            return array_values($data['checklist'] ?? []);
         }
 
         $labels = match ($data['workflow']) {
@@ -270,7 +307,13 @@ class OperationsController
             default => [],
         };
 
-        return array_map(fn (string $label) => ['label' => $label, 'completed' => false], $labels);
+        return array_map(fn (string $label) => [
+            'label' => $label,
+            'picRole' => $data['pics'][0],
+            'due' => $data['due'],
+            'dueTime' => null,
+            'completed' => false,
+        ], $labels);
     }
 
     private function authorizeChecklistManager(Request $request): void
@@ -321,7 +364,12 @@ class OperationsController
         $checklist = $value->checklistItems->map(fn ($item) => [
             'id' => $item->id,
             'label' => $item->label,
+            'picRole' => $item->pic_role,
+            'due' => $item->due?->format('Y-m-d'),
+            'dueTime' => $item->due_time,
             'completed' => $item->completed,
+            'completedAt' => $item->completed_at?->format('Y-m-d'),
+            'position' => $item->position,
         ])->values()->all();
 
         return ['id' => $value->id, 'name' => $value->name, 'client' => $value->client_id, 'status' => $value->status,

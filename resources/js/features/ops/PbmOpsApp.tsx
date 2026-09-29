@@ -1,5 +1,14 @@
 // @ts-nocheck -- faithful port of the approved interactive MVP; typed Inertia props live at the page boundary.
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  useMemo,
+  useCallback,
+  memo,
+} from "react";
 import TeamPerformance, { createTeamSeed } from "./TeamPerformance";
 import { router } from "@inertiajs/react";
 import {
@@ -28,6 +37,8 @@ import {
   Search,
   Archive,
   LogOut,
+  GripVertical,
+  ListChecks,
 } from "lucide-react";
 import {
   PieChart,
@@ -110,12 +121,37 @@ const WORKFLOW_META = {
   },
 };
 const CHECKLIST_TEMPLATES = {
-  build: ["Strategy & Copy", "Design & Backend", "Frontend", "Staging", "Internal QA", "Client Review", "Launch"],
-  optimization: ["Identifikasi perubahan", "Implementasi", "QA", "Approval", "Publish"],
+  build: [
+    "Strategy & Copy",
+    "Design & Backend",
+    "Frontend",
+    "Staging",
+    "Internal QA",
+    "Client Review",
+    "Launch",
+  ],
+  optimization: [
+    "Identifikasi perubahan",
+    "Implementasi",
+    "QA",
+    "Approval",
+    "Publish",
+  ],
   quick: [],
 };
-const checklistFor = (workflow) =>
-  (CHECKLIST_TEMPLATES[workflow] || []).map((label) => ({ label, completed: false }));
+const checklistFor = (
+  workflow,
+  picRole = "project-manager",
+  due = todayISO(),
+) =>
+  (CHECKLIST_TEMPLATES[workflow] || []).map((label, position) => ({
+    label,
+    picRole,
+    due,
+    dueTime: null,
+    completed: false,
+    position,
+  }));
 const taskPics = (task) => {
   const roles = Array.isArray(task?.pics) ? task.pics : [task?.pic];
   return [...new Set(roles.filter((role) => PIC[role]))];
@@ -1253,7 +1289,10 @@ function PicChip({ id }) {
 function WorkTypeTag({ workflow }) {
   const meta = WORKFLOW_META[workflow] || WORKFLOW_META.build;
   return (
-    <span className="inline-flex items-center rounded-full px-1.5 py-0.5 font-medium" style={{ ...pillStyle(meta.color), fontSize: 10 }}>
+    <span
+      className="inline-flex items-center rounded-full px-1.5 py-0.5 font-medium"
+      style={{ ...pillStyle(meta.color), fontSize: 10 }}
+    >
       {meta.label}
     </span>
   );
@@ -1264,10 +1303,25 @@ function ChecklistProgress({ task, compact = false }) {
   if (!items.length) return null;
   const done = items.filter((item) => item.completed).length;
   return (
-    <div className={compact ? "flex items-center gap-1" : "mt-2"} title={`${done} dari ${items.length} langkah selesai`}>
-      {!compact && <div className="mb-1 flex justify-between text-[10px] text-zinc-500"><span>Proses</span><span>{done}/{items.length}</span></div>}
-      <div className={`${compact ? "h-1 w-10" : "h-1.5 w-full"} overflow-hidden rounded-full bg-zinc-800`}>
-        <div className="h-full rounded-full bg-emerald-400" style={{ width: `${Math.round((done / items.length) * 100)}%` }} />
+    <div
+      className={compact ? "flex items-center gap-1" : "mt-2"}
+      title={`${done} dari ${items.length} langkah selesai`}
+    >
+      {!compact && (
+        <div className="mb-1 flex justify-between text-[10px] text-zinc-500">
+          <span>Proses</span>
+          <span>
+            {done}/{items.length}
+          </span>
+        </div>
+      )}
+      <div
+        className={`${compact ? "h-1 w-10" : "h-1.5 w-full"} overflow-hidden rounded-full bg-zinc-800`}
+      >
+        <div
+          className="h-full rounded-full bg-emerald-400"
+          style={{ width: `${Math.round((done / items.length) * 100)}%` }}
+        />
       </div>
     </div>
   );
@@ -1521,7 +1575,7 @@ function Pager({ page, pageCount, total, from, to, onChange }) {
 
 /* -------------------------- task card + cell (Task Board) -------------------------- */
 
-function TaskCard({ task, dimmed, onClick }) {
+const TaskCard = memo(function TaskCard({ task, dimmed, onClick }) {
   const { can } = useOps();
   const overdue = isOverdue(task);
   const urgency = urgencyColor(task);
@@ -1555,7 +1609,9 @@ function TaskCard({ task, dimmed, onClick }) {
           Urgent
         </span>
       )}
-      <div className="mb-2"><WorkTypeTag workflow={task.workflow} /></div>
+      <div className="mb-2">
+        <WorkTypeTag workflow={task.workflow} />
+      </div>
       <div className="flex items-start justify-between gap-2">
         <p
           className="font-medium leading-snug text-zinc-100"
@@ -1592,9 +1648,9 @@ function TaskCard({ task, dimmed, onClick }) {
       </div>
     </button>
   );
-}
+});
 
-function CompactTaskRow({ task, dimmed, onClick }) {
+const CompactTaskRow = memo(function CompactTaskRow({ task, dimmed, onClick }) {
   const { can } = useOps();
   const urgent = task.priority === "urgent";
   const overdue = isOverdue(task);
@@ -1644,7 +1700,7 @@ function CompactTaskRow({ task, dimmed, onClick }) {
       <ChecklistProgress task={task} compact />
     </button>
   );
-}
+});
 
 function TaskCell({ tasks, dimmedPic, onOpenTask }) {
   const [showFull, setShowFull] = useState(false);
@@ -1753,6 +1809,7 @@ function ViewToggle({ mode, onChange }) {
   );
   return (
     <div className="flex items-center gap-1 rounded-full border border-zinc-800 bg-zinc-900 p-1">
+      {opt("work", ListChecks, "Pekerjaan Saya")}
       {opt("kanban", LayoutGrid, "Board")}
       {opt("calendar", CalendarDays, "Calendar")}
     </div>
@@ -1799,6 +1856,7 @@ function TaskDetailModal({ task, onClose }) {
   const [draftChecklist, setDraftChecklist] = useState([]);
   const [checklistError, setChecklistError] = useState("");
   const [savingChecklist, setSavingChecklist] = useState(false);
+  const [draggedChecklistIndex, setDraggedChecklistIndex] = useState(null);
 
   useEffect(() => {
     setDraftChecklist(clone(task?.checklist || []));
@@ -1814,7 +1872,9 @@ function TaskDetailModal({ task, onClose }) {
   const workflow = WORKFLOW_META[task.workflow] || WORKFLOW_META.build;
   const checklist = task.checklist || [];
   const displayedChecklist = editingChecklist ? draftChecklist : checklist;
-  const displayedCompletedCount = displayedChecklist.filter((item) => item.completed).length;
+  const displayedCompletedCount = displayedChecklist.filter(
+    (item) => item.completed,
+  ).length;
   const displayedProgress = displayedChecklist.length
     ? Math.round((displayedCompletedCount / displayedChecklist.length) * 100)
     : 0;
@@ -1822,15 +1882,51 @@ function TaskDetailModal({ task, onClose }) {
     ["coo", "project-manager"].includes(currentUser?.role) &&
     can("update", "tasks");
 
+  function canToggleChecklistItem(item) {
+    return canManageChecklist || item.picRole === currentUser?.role;
+  }
+
+  function updateDraftChecklist(index, patch) {
+    setDraftChecklist((items) =>
+      items.map((entry, itemIndex) =>
+        itemIndex === index ? { ...entry, ...patch } : entry,
+      ),
+    );
+  }
+
+  function moveDraftChecklist(fromIndex, toIndex) {
+    if (
+      toIndex < 0 ||
+      toIndex >= draftChecklist.length ||
+      fromIndex === toIndex
+    )
+      return;
+    setDraftChecklist((items) => {
+      const next = [...items];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      return next.map((entry, position) => ({ ...entry, position }));
+    });
+  }
+
   async function submitChecklist() {
     const normalized = draftChecklist
-      .map((item) => ({
+      .map((item, position) => ({
+        ...(item.id ? { id: item.id } : {}),
         label: String(item.label || "").trim(),
+        picRole: item.picRole,
+        due: item.due,
+        dueTime: item.dueTime || null,
         completed: !!item.completed,
+        position,
       }))
       .filter((item) => item.label);
     if (!normalized.length) {
       setChecklistError("Tambahkan minimal satu langkah checklist.");
+      return;
+    }
+    if (normalized.some((item) => !PIC[item.picRole] || !item.due)) {
+      setChecklistError("Setiap langkah harus memiliki PIC dan deadline.");
       return;
     }
     setSavingChecklist(true);
@@ -1846,16 +1942,26 @@ function TaskDetailModal({ task, onClose }) {
   }
 
   return (
-    <Modal title={task.name} onClose={onClose} className="ops-dialog-task-detail">
+    <Modal
+      title={task.name}
+      onClose={onClose}
+      className="ops-dialog-task-detail"
+    >
       <div className="task-detail-meta-row">
         <div className="flex flex-wrap items-center gap-2">
           <WorkTypeTag workflow={task.workflow} />
           <CycleTag cycle={task.cycle} />
           <PriorityTag priority={task.priority} />
-          {task.blocked && <span className="rounded-full bg-rose-500/10 px-2 py-1 text-xs font-medium text-rose-300">Blocked</span>}
+          {task.blocked && (
+            <span className="rounded-full bg-rose-500/10 px-2 py-1 text-xs font-medium text-rose-300">
+              Blocked
+            </span>
+          )}
         </div>
         <div className="text-sm text-zinc-400">
-          <span className="font-medium text-zinc-200">{getClient(task.client).name}</span>
+          <span className="font-medium text-zinc-200">
+            {getClient(task.client).name}
+          </span>
           <span className="mx-2 text-zinc-700">•</span>
           Deadline {formatDate(task.due)}
         </div>
@@ -1864,18 +1970,28 @@ function TaskDetailModal({ task, onClose }) {
       <div className="task-detail-summary-grid">
         <div className="task-detail-summary-card">
           <p className="task-detail-label">PIC / pihak terlibat</p>
-          <div className="mt-2"><PicGroup task={task} showNames /></div>
+          <div className="mt-2">
+            <PicGroup task={task} showNames />
+          </div>
         </div>
         <div className="task-detail-summary-card">
           <p className="task-detail-label">Status task</p>
           {can("update", "tasks") ? (
-            <select className="mt-2" value={task.status} onChange={(event) => moveTask(task.id, event.target.value)}>
+            <select
+              className="mt-2"
+              value={task.status}
+              onChange={(event) => moveTask(task.id, event.target.value)}
+            >
               {STATUSES.map((status) => (
-                <option key={status.id} value={status.id}>{status.label}</option>
+                <option key={status.id} value={status.id}>
+                  {status.label}
+                </option>
               ))}
             </select>
           ) : (
-            <p className="mt-2 text-sm font-medium text-zinc-100">{STATUS_BY_ID[task.status].label}</p>
+            <p className="mt-2 text-sm font-medium text-zinc-100">
+              {STATUS_BY_ID[task.status].label}
+            </p>
           )}
         </div>
       </div>
@@ -1884,59 +2000,278 @@ function TaskDetailModal({ task, onClose }) {
         <div className="task-checklist-heading">
           <div>
             <p className="task-detail-label">Checklist proses</p>
-            <p className="mt-1 text-sm text-zinc-300">{displayedCompletedCount} dari {displayedChecklist.length} langkah selesai</p>
+            <p className="mt-1 text-sm text-zinc-300">
+              {displayedCompletedCount} dari {displayedChecklist.length} langkah
+              selesai
+            </p>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-sm font-semibold text-emerald-300">{displayedProgress}%</span>
+            <span className="text-sm font-semibold text-emerald-300">
+              {displayedProgress}%
+            </span>
             {canManageChecklist && !editingChecklist && (
-              <button className="ops-button" onClick={() => setEditingChecklist(true)}>Edit langkah</button>
+              <button
+                className="ops-button"
+                onClick={() => setEditingChecklist(true)}
+              >
+                Edit langkah
+              </button>
             )}
           </div>
         </div>
         <div className="mb-4 h-1.5 overflow-hidden rounded-full bg-zinc-800">
-          <div className="h-full rounded-full bg-emerald-400 transition-all" style={{ width: `${displayedProgress}%` }} />
+          <div
+            className="h-full rounded-full bg-emerald-400 transition-all"
+            style={{ width: `${displayedProgress}%` }}
+          />
         </div>
 
         {editingChecklist ? (
-          <div className="space-y-2">
+          <div className="space-y-3">
             {draftChecklist.map((item, index) => (
-              <div key={item.id || index} className="task-checklist-edit-row">
-                <input type="checkbox" checked={!!item.completed} onChange={(event) => setDraftChecklist((items) => items.map((entry, itemIndex) => itemIndex === index ? { ...entry, completed: event.target.checked } : entry))} />
-                <input aria-label={`Nama langkah ${index + 1}`} value={item.label} onChange={(event) => setDraftChecklist((items) => items.map((entry, itemIndex) => itemIndex === index ? { ...entry, label: event.target.value } : entry))} />
-                <button type="button" className="ops-button ops-danger" aria-label={`Hapus langkah ${index + 1}`} onClick={() => setDraftChecklist((items) => items.filter((_, itemIndex) => itemIndex !== index))}>Hapus</button>
+              <div
+                key={item.id || `new-${index}`}
+                className="task-checklist-edit-row"
+                draggable
+                onDragStart={() => setDraggedChecklistIndex(index)}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={() => {
+                  if (draggedChecklistIndex !== null)
+                    moveDraftChecklist(draggedChecklistIndex, index);
+                  setDraggedChecklistIndex(null);
+                }}
+                onDragEnd={() => setDraggedChecklistIndex(null)}
+              >
+                <div className="task-checklist-row-left">
+                  <GripVertical
+                    className="task-checklist-drag h-4 w-4"
+                    aria-hidden="true"
+                    title="Geser urutan langkah"
+                  />
+                  <input
+                    type="checkbox"
+                    checked={!!item.completed}
+                    aria-label={`Status langkah ${index + 1}`}
+                    onChange={(event) =>
+                      updateDraftChecklist(index, {
+                        completed: event.target.checked,
+                      })
+                    }
+                  />
+                </div>
+                <div className="task-checklist-item-body">
+                  <textarea
+                    rows={2}
+                    className="task-checklist-textarea"
+                    aria-label={`Nama langkah ${index + 1}`}
+                    value={item.label}
+                    placeholder={`Nama langkah ${index + 1}`}
+                    onChange={(event) =>
+                      updateDraftChecklist(index, { label: event.target.value })
+                    }
+                  />
+                  <div className="task-checklist-meta-row">
+                    <div className="task-checklist-meta-item">
+                      <span className="task-checklist-meta-label">PIC</span>
+                      <select
+                        aria-label={`PIC langkah ${index + 1}`}
+                        value={item.picRole || ""}
+                        onChange={(event) =>
+                          updateDraftChecklist(index, {
+                            picRole: event.target.value,
+                          })
+                        }
+                      >
+                        <option value="" disabled>
+                          Pilih PIC
+                        </option>
+                        {Object.entries(PIC).map(([role, person]) => (
+                          <option key={role} value={role}>
+                            {person.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="task-checklist-meta-item">
+                      <span className="task-checklist-meta-label">Deadline</span>
+                      <div className="task-checklist-date-time-group">
+                        <input
+                          aria-label={`Deadline langkah ${index + 1}`}
+                          type="date"
+                          value={item.due || ""}
+                          onChange={(event) =>
+                            updateDraftChecklist(index, { due: event.target.value })
+                          }
+                        />
+                        <input
+                          aria-label={`Jam deadline langkah ${index + 1}`}
+                          type="time"
+                          className="task-checklist-time-input"
+                          value={item.dueTime || ""}
+                          placeholder="--:--"
+                          onChange={(event) =>
+                            updateDraftChecklist(index, {
+                              dueTime: event.target.value || null,
+                            })
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  {item.due && task.due && item.due > task.due && (
+                    <p className="task-checklist-warning">
+                      ⚠️ Deadline langkah melewati deadline task ({formatDate(task.due)}).
+                    </p>
+                  )}
+                </div>
+                <div className="task-checklist-edit-actions">
+                  <button
+                    type="button"
+                    className="ops-icon-button"
+                    disabled={index === 0}
+                    aria-label={`Naikkan langkah ${index + 1}`}
+                    onClick={() => moveDraftChecklist(index, index - 1)}
+                    title="Naikkan langkah"
+                  >
+                    <ArrowUp className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    className="ops-icon-button"
+                    disabled={index === draftChecklist.length - 1}
+                    aria-label={`Turunkan langkah ${index + 1}`}
+                    onClick={() => moveDraftChecklist(index, index + 1)}
+                    title="Turunkan langkah"
+                  >
+                    <ArrowDown className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    className="ops-button ops-danger task-checklist-delete-btn"
+                    aria-label={`Hapus langkah ${index + 1}`}
+                    onClick={() =>
+                      setDraftChecklist((items) =>
+                        items.filter((_, itemIndex) => itemIndex !== index),
+                      )
+                    }
+                    title="Hapus langkah"
+                  >
+                    Hapus
+                  </button>
+                </div>
               </div>
             ))}
-            <button type="button" className="ops-button mt-2" onClick={() => setDraftChecklist((items) => [...items, { label: "", completed: false }])}>+ Tambah langkah</button>
-            {checklistError && <p className="text-sm text-rose-300">{checklistError}</p>}
+            <button
+              type="button"
+              className="ops-button mt-3"
+              onClick={() =>
+                setDraftChecklist((items) => [
+                  ...items,
+                  {
+                    label: "",
+                    picRole: task.pics?.[0] || task.pic || "project-manager",
+                    due: task.due,
+                    dueTime: null,
+                    completed: false,
+                    position: items.length,
+                  },
+                ])
+              }
+            >
+              + Tambah langkah
+            </button>
+            {checklistError && (
+              <p className="text-sm text-rose-300">{checklistError}</p>
+            )}
             <div className="flex justify-end gap-2 border-t border-zinc-800 pt-4">
-              <button type="button" className="ops-button" onClick={() => { setDraftChecklist(clone(task.checklist || [])); setEditingChecklist(false); setChecklistError(""); }}>Batal</button>
-              <button type="button" className="ops-button ops-primary" disabled={savingChecklist} onClick={submitChecklist}>{savingChecklist ? "Menyimpan…" : "Simpan checklist"}</button>
+              <button
+                type="button"
+                className="ops-button"
+                onClick={() => {
+                  setDraftChecklist(clone(task.checklist || []));
+                  setEditingChecklist(false);
+                  setChecklistError("");
+                }}
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                className="ops-button ops-primary"
+                disabled={savingChecklist}
+                onClick={submitChecklist}
+              >
+                {savingChecklist ? "Menyimpan…" : "Simpan checklist"}
+              </button>
             </div>
           </div>
         ) : checklist.length ? (
           <div className="task-checklist-list">
             {checklist.map((item, index) => (
-              <div key={item.id || item.label} className="task-checklist-view-row">
-                <input aria-label={item.label} type="checkbox" checked={!!item.completed} disabled={!canManageChecklist} onChange={(event) => toggleChecklist(task.id, item.id, event.target.checked)} />
+              <div
+                key={item.id || item.label}
+                className="task-checklist-view-row"
+              >
+                <input
+                  aria-label={item.label}
+                  type="checkbox"
+                  checked={!!item.completed}
+                  disabled={!canToggleChecklistItem(item)}
+                  onChange={(event) =>
+                    toggleChecklist(task.id, item.id, event.target.checked)
+                  }
+                />
                 <span className="task-checklist-number">{index + 1}</span>
-                <span className={`min-w-0 flex-1 text-sm ${item.completed ? "text-zinc-500 line-through" : "text-zinc-200"}`}>{item.label}</span>
-                <span className={`text-xs ${item.completed ? "text-emerald-300" : "text-zinc-600"}`}>{item.completed ? "Selesai" : "Belum"}</span>
+                <div className="min-w-0 flex-1">
+                  <p
+                    className={`text-sm ${item.completed ? "text-zinc-500 line-through" : "text-zinc-200"}`}
+                  >
+                    {item.label}
+                  </p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                    <span>{PIC[item.picRole]?.name || item.picRole}</span>
+                    <span>•</span>
+                    <span
+                      className={
+                        !item.completed && item.due < todayISO()
+                          ? "text-rose-300"
+                          : ""
+                      }
+                    >
+                      {formatDate(item.due)}
+                      {item.dueTime ? ` ${item.dueTime}` : ""}
+                    </span>
+                  </div>
+                </div>
+                <span
+                  className={`text-xs ${item.completed ? "text-emerald-300" : "text-zinc-600"}`}
+                >
+                  {item.completed ? "Selesai" : "Belum"}
+                </span>
               </div>
             ))}
           </div>
         ) : (
           <div className="rounded-lg border border-dashed border-zinc-700 px-4 py-5 text-center text-sm text-zinc-500">
-            Belum ada checklist.{canManageChecklist ? " Pilih Edit langkah untuk menambah proses." : ""}
+            Belum ada checklist.
+            {canManageChecklist
+              ? " Pilih Edit langkah untuk menambah proses."
+              : ""}
           </div>
         )}
-        {canManageChecklist && !editingChecklist && checklist.length > 0 && (
-          <p className="mt-3 text-xs text-zinc-500">Centang langkah untuk memperbarui progress secara langsung.</p>
+        {!editingChecklist && checklist.length > 0 && (
+          <p className="mt-3 text-xs text-zinc-500">
+            Setiap PIC dapat menyelesaikan langkah yang ditugaskan kepadanya.
+            COO dan Project Manager dapat mengatur seluruh checklist.
+          </p>
         )}
       </section>
 
       <section className="task-detail-section">
         <p className="task-detail-label">Brief</p>
-        <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-300">{task.brief || "Belum ada brief untuk task ini."}</p>
+        <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-zinc-300">
+          {task.brief || "Belum ada brief untuk task ini."}
+        </p>
       </section>
 
       {can("update", "tasks") && (
@@ -1965,6 +2300,329 @@ function TaskDetailModal({ task, onClose }) {
   );
 }
 
+/* -------------------------- my work view -------------------------- */
+
+function MyWorkItem({ item, onOpenTask }) {
+  const { getClient, currentUser, toggleChecklist, toggleDirectTask } =
+    useOps();
+  const isManager = ["coo", "project-manager"].includes(currentUser?.role);
+  const canToggle =
+    item.kind === "checklist"
+      ? isManager || item.picRole === currentUser?.role
+      : isManager || item.picRoles.includes(currentUser?.role);
+  const overdue = !item.completed && item.due && item.due < todayISO();
+
+  async function toggle(completed) {
+    if (item.kind === "checklist")
+      await toggleChecklist(item.task.id, item.id, completed);
+    else await toggleDirectTask(item.task.id, completed);
+  }
+
+  return (
+    <div className={`my-work-item ${overdue ? "my-work-item-overdue" : ""}`}>
+      <input
+        type="checkbox"
+        aria-label={`Tandai ${item.label} selesai`}
+        checked={item.completed}
+        disabled={!canToggle}
+        onChange={(event) => toggle(event.target.checked)}
+      />
+      <button
+        className="min-w-0 flex-1 text-left"
+        onClick={() => onOpenTask(item.task)}
+      >
+        <p
+          className={`truncate text-sm font-medium ${item.completed ? "text-zinc-500 line-through" : "text-zinc-100"}`}
+        >
+          {item.label}
+        </p>
+        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+          <span>{getClient(item.task.client).name}</span>
+          <span>•</span>
+          <span>
+            {item.kind === "checklist" ? item.task.name : "Task langsung"}
+          </span>
+        </div>
+      </button>
+      <div className="my-work-item-meta">
+        <WorkTypeTag workflow={item.task.workflow} />
+        {item.task.priority === "urgent" && <PriorityTag priority="urgent" />}
+        <span className={overdue ? "text-rose-300" : "text-zinc-400"}>
+          {item.due
+            ? `${formatDate(item.due)}${item.dueTime ? ` ${item.dueTime}` : ""}`
+            : "Tanpa deadline"}
+        </span>
+        {item.kind === "checklist" && (
+          <span>{PIC[item.picRole]?.name || item.picRole}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MyWorkView({ tasks, onOpenTask }) {
+  const { CLIENTS, currentUser } = useOps();
+  const isManager = ["coo", "project-manager"].includes(currentUser?.role);
+  const [roleFilter, setRoleFilter] = useState(
+    isManager ? "all" : currentUser?.role,
+  );
+  const [clientFilter, setClientFilter] = useState("all");
+  const [workflowFilter, setWorkflowFilter] = useState("all");
+  const [showAllFuture, setShowAllFuture] = useState(false);
+  const [showCompleted, setShowCompleted] = useState(false);
+  const today = todayISO();
+  const nextWeek = dateShift(today, 7);
+
+  const items = tasks
+    .flatMap((task) => {
+      if (task.checklist?.length) {
+        return task.checklist.map((entry, position) => ({
+          ...entry,
+          kind: "checklist",
+          task,
+          label: entry.label,
+          position,
+        }));
+      }
+      return [
+        {
+          id: `task-${task.id}`,
+          kind: "task",
+          task,
+          label: task.name,
+          picRoles: taskPics(task),
+          due: task.due,
+          completed: task.status === "done",
+          completedAt: task.completedAt,
+          position: 0,
+        },
+      ];
+    })
+    .filter((item) => {
+      const roleMatch =
+        roleFilter === "all" ||
+        (item.kind === "checklist"
+          ? item.picRole === roleFilter
+          : item.picRoles.includes(roleFilter));
+      const clientMatch =
+        clientFilter === "all" || item.task.client === clientFilter;
+      const workflowMatch =
+        workflowFilter === "all" || item.task.workflow === workflowFilter;
+      return roleMatch && clientMatch && workflowMatch;
+    });
+
+  const sortItems = (values) =>
+    [...values].sort((a, b) => {
+      if ((a.task.priority === "urgent") !== (b.task.priority === "urgent"))
+        return a.task.priority === "urgent" ? -1 : 1;
+      return (
+        String(a.due || "9999-12-31").localeCompare(
+          String(b.due || "9999-12-31"),
+        ) ||
+        a.position - b.position ||
+        String(
+          CLIENTS.find((client) => client.id === a.task.client)?.name || "",
+        ).localeCompare(
+          String(
+            CLIENTS.find((client) => client.id === b.task.client)?.name || "",
+          ),
+        )
+      );
+    });
+  const groups = [
+    {
+      id: "overdue",
+      title: "Terlambat",
+      description: "Kerjakan atau eskalasi lebih dulu",
+      tone: "rose",
+      items: items.filter(
+        (item) => !item.completed && item.due && item.due < today,
+      ),
+    },
+    {
+      id: "today",
+      title: "Hari ini",
+      description: "Fokus utama hari ini",
+      tone: "violet",
+      items: items.filter((item) => !item.completed && item.due === today),
+    },
+    {
+      id: "upcoming",
+      title: showAllFuture ? "Akan datang" : "7 hari ke depan",
+      description: "Persiapan pekerjaan berikutnya",
+      tone: "sky",
+      items: items.filter(
+        (item) =>
+          !item.completed &&
+          item.due > today &&
+          (showAllFuture || item.due <= nextWeek),
+      ),
+    },
+    {
+      id: "unscheduled",
+      title: "Belum dijadwalkan",
+      description: "Butuh deadline dari Project Manager",
+      tone: "zinc",
+      items: items.filter((item) => !item.completed && !item.due),
+    },
+    {
+      id: "completed",
+      title: "Selesai hari ini",
+      description: "Progress yang sudah ditutup",
+      tone: "emerald",
+      collapsible: true,
+      items: items.filter(
+        (item) => item.completed && item.completedAt === today,
+      ),
+    },
+  ];
+  const visibleCount = groups.reduce(
+    (total, group) => total + group.items.length,
+    0,
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="my-work-toolbar">
+        {isManager && (
+          <label>
+            <span>PIC</span>
+            <select
+              value={roleFilter}
+              onChange={(event) => setRoleFilter(event.target.value)}
+            >
+              <option value="all">Semua role</option>
+              {Object.entries(PIC).map(([role, person]) => (
+                <option key={role} value={role}>
+                  {person.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <label>
+          <span>Client</span>
+          <select
+            value={clientFilter}
+            onChange={(event) => setClientFilter(event.target.value)}
+          >
+            <option value="all">Semua client</option>
+            {CLIENTS.map((client) => (
+              <option key={client.id} value={client.id}>
+                {client.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Jenis</span>
+          <select
+            value={workflowFilter}
+            onChange={(event) => setWorkflowFilter(event.target.value)}
+          >
+            <option value="all">Semua jenis</option>
+            {Object.entries(WORKFLOW_META).map(([value, meta]) => (
+              <option key={value} value={value}>
+                {meta.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="my-work-future-toggle">
+          <input
+            type="checkbox"
+            checked={showAllFuture}
+            onChange={(event) => setShowAllFuture(event.target.checked)}
+          />{" "}
+          Tampilkan semua tanggal mendatang
+        </label>
+        <label className="my-work-future-toggle">
+          <input
+            type="checkbox"
+            checked={showCompleted}
+            onChange={(event) => setShowCompleted(event.target.checked)}
+          />{" "}
+          Tampilkan pekerjaan selesai
+        </label>
+      </div>
+      <div className="my-work-summary">
+        <div>
+          <strong>
+            {
+              items.filter(
+                (item) => !item.completed && item.due && item.due < today,
+              ).length
+            }
+          </strong>
+          <span>Terlambat</span>
+        </div>
+        <div>
+          <strong>
+            {
+              items.filter((item) => !item.completed && item.due === today)
+                .length
+            }
+          </strong>
+          <span>Hari ini</span>
+        </div>
+        <div>
+          <strong>
+            {
+              items.filter(
+                (item) => item.completed && item.completedAt === today,
+              ).length
+            }
+          </strong>
+          <span>Selesai hari ini</span>
+        </div>
+      </div>
+      {visibleCount ? (
+        groups.map(
+          (group) =>
+            group.items.length > 0 && (
+              <section
+                key={group.id}
+                className={`my-work-group my-work-group-${group.tone}`}
+              >
+                <header>
+                  <div>
+                    <h2>{group.title}</h2>
+                    <p>{group.description}</p>
+                  </div>
+                  {group.collapsible ? (
+                    <button
+                      className="ops-button"
+                      onClick={() => setShowCompleted((value) => !value)}
+                    >
+                      {showCompleted
+                        ? "Sembunyikan"
+                        : `Lihat ${group.items.length}`}
+                    </button>
+                  ) : (
+                    <span>{group.items.length}</span>
+                  )}
+                </header>
+                {(!group.collapsible || showCompleted) && (
+                  <div>
+                    {sortItems(group.items).map((item) => (
+                      <MyWorkItem
+                        key={`${item.kind}-${item.id}`}
+                        item={item}
+                        onOpenTask={onOpenTask}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+            ),
+        )
+      ) : (
+        <p className="ops-empty">Tidak ada pekerjaan untuk filter ini.</p>
+      )}
+    </div>
+  );
+}
+
 /* -------------------------- calendar view -------------------------- */
 
 const WEEKDAY_LABELS = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Ming"];
@@ -1982,8 +2640,15 @@ function getMonthMatrix(year, monthIndex) {
   return weeks;
 }
 
-function CalendarView({ tasks, activePic, onOpenTask }) {
-  const { CLIENT_COLOR } = useOps();
+function CalendarView({ tasks, onOpenTask }) {
+  const { CLIENTS, CLIENT_COLOR, currentUser } = useOps();
+  const isManager = ["coo", "project-manager"].includes(currentUser?.role);
+  const [eventType, setEventType] = useState("all");
+  const [roleFilter, setRoleFilter] = useState(
+    isManager ? "all" : currentUser?.role,
+  );
+  const [clientFilter, setClientFilter] = useState("all");
+  const [expandedDay, setExpandedDay] = useState(null);
   const [cursor, setCursor] = useState(
     new Date(new Date().getFullYear(), new Date().getMonth(), 1),
   );
@@ -1996,15 +2661,44 @@ function CalendarView({ tasks, activePic, onOpenTask }) {
   });
   const todayStr = todayISO();
 
-  function tasksOnDay(day) {
+  const events = tasks
+    .flatMap((task) => {
+      const taskEvent = {
+        id: `task-${task.id}`,
+        type: "task",
+        label: task.name,
+        due: task.due,
+        roles: taskPics(task),
+        task,
+      };
+      const checklistEvents = (task.checklist || []).map((item) => ({
+        id: `checklist-${item.id}`,
+        type: "checklist",
+        label: item.label,
+        due: item.due,
+        roles: [item.picRole],
+        completed: item.completed,
+        task,
+      }));
+      return [taskEvent, ...checklistEvents];
+    })
+    .filter(
+      (event) =>
+        event.due &&
+        (eventType === "all" || event.type === eventType) &&
+        (roleFilter === "all" || event.roles.includes(roleFilter)) &&
+        (clientFilter === "all" || event.task.client === clientFilter),
+    );
+
+  function eventsOnDay(day) {
     if (!day) return [];
     const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-    return tasks.filter((t) => t.due === iso);
+    return events.filter((event) => event.due === iso);
   }
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <button
             onClick={() => setCursor(new Date(year, month - 1, 1))}
@@ -2035,7 +2729,7 @@ function CalendarView({ tasks, activePic, onOpenTask }) {
             ...new Set([
               todayISO().slice(0, 7),
               `${year}-${String(month + 1).padStart(2, "0")}`,
-              ...tasks.map((t) => t.due.slice(0, 7)),
+              ...events.map((event) => event.due.slice(0, 7)),
             ]),
           ]
             .sort()
@@ -2061,13 +2755,59 @@ function CalendarView({ tasks, activePic, onOpenTask }) {
         </button>
       </div>
 
+      <div className="calendar-filters">
+        <label>
+          <span>Tampilkan</span>
+          <select
+            value={eventType}
+            onChange={(event) => setEventType(event.target.value)}
+          >
+            <option value="all">Task & checklist</option>
+            <option value="task">Task saja</option>
+            <option value="checklist">Checklist saja</option>
+          </select>
+        </label>
+        {isManager && (
+          <label>
+            <span>PIC</span>
+            <select
+              value={roleFilter}
+              onChange={(event) => setRoleFilter(event.target.value)}
+            >
+              <option value="all">Semua role</option>
+              {Object.entries(PIC).map(([role, person]) => (
+                <option key={role} value={role}>
+                  {person.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <label>
+          <span>Client</span>
+          <select
+            value={clientFilter}
+            onChange={(event) => setClientFilter(event.target.value)}
+          >
+            <option value="all">Semua client</option>
+            {CLIENTS.map((client) => (
+              <option key={client.id} value={client.id}>
+                {client.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
       <p className="mb-3 text-sm text-zinc-400">
         {
-          tasks.filter((t) =>
-            t.due.startsWith(`${year}-${String(month + 1).padStart(2, "0")}`),
+          events.filter((event) =>
+            event.due.startsWith(
+              `${year}-${String(month + 1).padStart(2, "0")}`,
+            ),
           ).length
         }{" "}
-        task bulan ini · tanggal mengikuti deadline. Pilih bulan lain untuk
+        deadline bulan ini · mencakup task dan checklist. Pilih bulan lain untuk
         melihat riwayat.
       </p>
       <div className="overflow-x-auto rounded-xl border border-zinc-800">
@@ -2086,7 +2826,7 @@ function CalendarView({ tasks, activePic, onOpenTask }) {
           {weeks.map((week, wi) => (
             <div key={wi} className="grid grid-cols-7">
               {week.map((day, di) => {
-                const dayTasks = tasksOnDay(day);
+                const dayEvents = eventsOnDay(day);
                 const iso = day
                   ? `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`
                   : null;
@@ -2118,26 +2858,62 @@ function CalendarView({ tasks, activePic, onOpenTask }) {
                           {day}
                         </span>
                         <div className="mt-1 space-y-1">
-                          {dayTasks.map((t) => {
-                            const dimmed =
-                              Boolean(activePic) && !taskHasPic(t, activePic);
-                            const c = CLIENT_COLOR[t.client] || ACCENT;
-                            return (
-                              <button
-                                key={t.id}
-                                onClick={() => onOpenTask(t)}
-                                className="flex w-full items-center gap-1 truncate rounded px-1 py-0.5 text-left hover:opacity-80"
-                                style={{
-                                  fontSize: 10,
-                                  opacity: dimmed ? 0.3 : 1,
-                                  backgroundColor: rgba(c, 0.15),
-                                  color: c,
-                                }}
-                              >
-                                <span className="truncate">{t.name}</span>
-                              </button>
-                            );
-                          })}
+                          {dayEvents
+                            .slice(
+                              0,
+                              expandedDay === iso ? dayEvents.length : 4,
+                            )
+                            .map((event) => {
+                              const c =
+                                CLIENT_COLOR[event.task.client] || ACCENT;
+                              const eventLabel =
+                                event.type === "checklist"
+                                  ? `${event.label} · ${event.task.name} · ${PIC[event.roles[0]]?.name || event.roles[0]}`
+                                  : event.label;
+                              return (
+                                <button
+                                  key={event.id}
+                                  onClick={() => onOpenTask(event.task)}
+                                  title={eventLabel}
+                                  className="flex w-full items-center gap-1 truncate rounded px-1 py-0.5 text-left hover:opacity-80"
+                                  style={{
+                                    fontSize: 10,
+                                    backgroundColor:
+                                      event.type === "checklist"
+                                        ? rgba(COLOR.sky, 0.15)
+                                        : rgba(c, 0.15),
+                                    color:
+                                      event.type === "checklist"
+                                        ? COLOR.sky
+                                        : c,
+                                    textDecoration: event.completed
+                                      ? "line-through"
+                                      : undefined,
+                                  }}
+                                >
+                                  <span className="shrink-0 font-semibold">
+                                    {event.type === "checklist" ? "✓" : "T"}
+                                  </span>
+                                  <span className="truncate">{eventLabel}</span>
+                                </button>
+                              );
+                            })}
+                          {dayEvents.length > 4 && expandedDay !== iso && (
+                            <button
+                              className="w-full rounded px-1 py-0.5 text-left text-xs text-zinc-500 hover:bg-zinc-900"
+                              onClick={() => setExpandedDay(iso)}
+                            >
+                              +{dayEvents.length - 4} deadline lainnya
+                            </button>
+                          )}
+                          {expandedDay === iso && dayEvents.length > 4 && (
+                            <button
+                              className="w-full rounded px-1 py-0.5 text-left text-xs text-zinc-500 hover:bg-zinc-900"
+                              onClick={() => setExpandedDay(null)}
+                            >
+                              Tampilkan ringkas
+                            </button>
+                          )}
                         </div>
                       </>
                     )}
@@ -2168,12 +2944,24 @@ function WorkflowBoardGrid({
 }) {
   const gridTemplate = `210px repeat(${statuses.length}, minmax(190px, 1fr))`;
   const visibleClients = clients;
-  const statusCounts = Object.fromEntries(
-    statuses.map((status) => [
-      status.id,
-      tasks.filter((task) => task.status === status.id).length,
-    ]),
+  const statusCounts = useMemo(
+    () =>
+      Object.fromEntries(
+        statuses.map((status) => [
+          status.id,
+          tasks.filter((task) => task.status === status.id).length,
+        ]),
+      ),
+    [tasks, statuses],
   );
+  const tasksByClient = useMemo(() => {
+    const map = {};
+    for (const task of tasks) {
+      if (!map[task.client]) map[task.client] = [];
+      map[task.client].push(task);
+    }
+    return map;
+  }, [tasks]);
 
   return (
     <div className="space-y-3">
@@ -2204,9 +2992,7 @@ function WorkflowBoardGrid({
               ))}
             </div>
             {visibleClients.map((client) => {
-              const clientTasks = tasks.filter(
-                (task) => task.client === client.id,
-              );
+              const clientTasks = tasksByClient[client.id] || [];
               const openCount = clientTasks.filter(
                 (task) => task.status !== "done",
               ).length;
@@ -2240,12 +3026,16 @@ function WorkflowBoardGrid({
                       {openCount} open
                       {overdueCount > 0 && (
                         <span style={{ color: COLOR.rose }}>
-                          {" "}· {overdueCount} overdue
+                          {" "}
+                          · {overdueCount} overdue
                         </span>
                       )}
                     </span>
                     {onAddTask && (
-                      <button className="mt-1 self-start text-xs font-medium text-violet-300 hover:text-violet-200" onClick={() => onAddTask(client.id)}>
+                      <button
+                        className="mt-1 self-start text-xs font-medium text-violet-300 hover:text-violet-200"
+                        onClick={() => onAddTask(client.id)}
+                      >
                         + Task
                       </button>
                     )}
@@ -2298,9 +3088,13 @@ function WorkflowBoardGrid({
 
 function ExecutionBoard({ highlightClient, onHighlightHandled }) {
   const { CLIENTS, TASKS, currentUser, openEditor, moveTask, can } = useOps();
-  const [viewMode, setViewMode] = useState("kanban");
+  const [viewMode, setViewMode] = useState(
+    ["coo", "project-manager"].includes(currentUser?.role) ? "kanban" : "work",
+  );
   const [activePic, setActivePic] = useState(null);
-  const [scope, setScope] = useState(["coo", "project-manager"].includes(currentUser?.role) ? "all" : "mine");
+  const [scope, setScope] = useState(
+    ["coo", "project-manager"].includes(currentUser?.role) ? "all" : "mine",
+  );
   const [doneWindow, setDoneWindow] = useState("weekly");
   const [pulseId, setPulseId] = useState(null);
   const [selectedTask, setSelectedTask] = useState(null);
@@ -2324,21 +3118,43 @@ function ExecutionBoard({ highlightClient, onHighlightHandled }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlightClient]);
 
-  const scopedTasks = TASKS.filter((task) =>
-    (scope === "all" || taskHasPic(task, currentUser?.role)) &&
-    (!activePic || taskHasPic(task, activePic)),
+  const scopedTasks = useMemo(
+    () =>
+      TASKS.filter(
+        (task) =>
+          (scope === "all" || taskHasPic(task, currentUser?.role)) &&
+          (!activePic || taskHasPic(task, activePic)),
+      ),
+    [TASKS, scope, currentUser?.role, activePic],
   );
-  const boardTasks = scopedTasks.filter((task) => doneTaskVisible(task, doneWindow));
+  const boardTasks = useMemo(
+    () => scopedTasks.filter((task) => doneTaskVisible(task, doneWindow)),
+    [scopedTasks, doneWindow],
+  );
   const hiddenDoneCount = TASKS.filter(
     (task) => task.status === "done" && !doneTaskVisible(task, doneWindow),
   ).length;
   return (
     <section className="space-y-5">
       <PageHeader
-        icon={LayoutGrid}
+        icon={
+          viewMode === "work"
+            ? ListChecks
+            : viewMode === "calendar"
+              ? CalendarDays
+              : LayoutGrid
+        }
         eyebrow="Task Board"
-        title="Semua pekerjaan, satu board"
-        description="Setiap client memiliki satu baris. Pindahkan task dari Intake ke Done, lalu pantau detail prosesnya lewat checklist."
+        title={
+          viewMode === "work"
+            ? "Pekerjaan yang perlu ditangani"
+            : "Semua pekerjaan, satu board"
+        }
+        description={
+          viewMode === "work"
+            ? "Mulai dari pekerjaan terlambat dan hari ini. Setiap langkah menampilkan client, deadline, serta PIC yang bertanggung jawab."
+            : "Setiap client memiliki satu baris. Pindahkan task dari Intake ke Done, lalu pantau detail prosesnya lewat checklist."
+        }
         actions={<ViewToggle mode={viewMode} onChange={setViewMode} />}
       />
 
@@ -2354,48 +3170,63 @@ function ExecutionBoard({ highlightClient, onHighlightHandled }) {
             </button>
           )}
           <span className="self-center text-sm text-zinc-400">
-            {can("update", "tasks")
-              ? "Tarik kartu ke kolom lain, atau ubah status melalui detail task."
-              : "Akses read-only sesuai role Anda."}
+            {viewMode === "work"
+              ? "Centang checklist yang ditugaskan kepada role Anda setelah pekerjaan selesai."
+              : can("update", "tasks")
+                ? "Tarik kartu ke kolom lain, atau ubah status melalui detail task."
+                : "Akses read-only sesuai role Anda."}
           </span>
         </div>
-        <label className="flex items-center gap-2 text-sm text-zinc-400">
-          <Archive className="h-4 w-4 text-zinc-500" />
-          Task Done
-          <select
-            className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-200 focus:border-violet-500 focus:outline-none"
-            aria-label="Tampilkan task Done"
-            value={doneWindow}
-            onChange={(event) => setDoneWindow(event.target.value)}
-          >
-            <option value="weekly">Minggu ini</option>
-            <option value="monthly">Bulan ini</option>
-            <option value="all">Semua riwayat</option>
-          </select>
-          {hiddenDoneCount > 0 && (
-            <span className="rounded-full bg-zinc-800 px-2 py-1 text-xs text-zinc-500">
-              {hiddenDoneCount} tersimpan
-            </span>
-          )}
-        </label>
+        {viewMode !== "work" && (
+          <label className="flex items-center gap-2 text-sm text-zinc-400">
+            <Archive className="h-4 w-4 text-zinc-500" />
+            Task Done
+            <select
+              className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-zinc-200 focus:border-violet-500 focus:outline-none"
+              aria-label="Tampilkan task Done"
+              value={doneWindow}
+              onChange={(event) => setDoneWindow(event.target.value)}
+            >
+              <option value="weekly">Minggu ini</option>
+              <option value="monthly">Bulan ini</option>
+              <option value="all">Semua riwayat</option>
+            </select>
+            {hiddenDoneCount > 0 && (
+              <span className="rounded-full bg-zinc-800 px-2 py-1 text-xs text-zinc-500">
+                {hiddenDoneCount} tersimpan
+              </span>
+            )}
+          </label>
+        )}
       </div>
       {!CLIENTS.length && (
         <p className="ops-empty">
           Belum ada client. Tambahkan client melalui tab Clients.
         </p>
       )}
-      <div className="flex flex-wrap items-center gap-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
-        <div className="mb-4 flex rounded-lg border border-zinc-800 bg-zinc-950 p-1">
-          {[{ id: "all", label: "Semua Task" }, { id: "mine", label: "Task Saya" }].map((option) => (
-            <button key={option.id} onClick={() => setScope(option.id)} className={`rounded-md px-3 py-1.5 text-sm ${scope === option.id ? "bg-violet-600 text-white" : "text-zinc-400 hover:text-zinc-200"}`}>
-              {option.label}
-            </button>
-          ))}
+      {viewMode === "kanban" && (
+        <div className="flex flex-wrap items-center gap-4 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+          <div className="mb-4 flex rounded-lg border border-zinc-800 bg-zinc-950 p-1">
+            {[
+              { id: "all", label: "Semua Task" },
+              { id: "mine", label: "Task Saya" },
+            ].map((option) => (
+              <button
+                key={option.id}
+                onClick={() => setScope(option.id)}
+                className={`rounded-md px-3 py-1.5 text-sm ${scope === option.id ? "bg-violet-600 text-white" : "text-zinc-400 hover:text-zinc-200"}`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <PicFilterSelect activePic={activePic} onChange={setActivePic} />
         </div>
-        <PicFilterSelect activePic={activePic} onChange={setActivePic} />
-      </div>
+      )}
 
-      {viewMode === "kanban" ? (
+      {viewMode === "work" ? (
+        <MyWorkView tasks={TASKS} onOpenTask={setSelectedTask} />
+      ) : viewMode === "kanban" ? (
         <WorkflowBoardGrid
           title="Task Board"
           description="Build, Optimization, dan Quick memakai status yang sama agar board mudah dipahami."
@@ -2406,16 +3237,16 @@ function ExecutionBoard({ highlightClient, onHighlightHandled }) {
           pulseId={pulseId}
           rowRefs={rowRefs}
           onOpenTask={setSelectedTask}
-          onAddTask={can("create", "tasks") ? (client) => openEditor("tasks", null, { client }) : null}
+          onAddTask={
+            can("create", "tasks")
+              ? (client) => openEditor("tasks", null, { client })
+              : null
+          }
           onMoveTask={moveTask}
           canMove={can("update", "tasks")}
         />
       ) : (
-        <CalendarView
-          tasks={scopedTasks}
-          activePic={activePic}
-          onOpenTask={setSelectedTask}
-        />
+        <CalendarView tasks={TASKS} onOpenTask={setSelectedTask} />
       )}
 
       <TaskDetailModal
@@ -2760,7 +3591,11 @@ function DeliveryReport({ tasks }) {
   const report = taskDeliveryReport(tasks, anchor, mode);
   const workTypeReports = Object.keys(WORKFLOW_META).map((workflow) => ({
     workflow,
-    ...taskDeliveryReport(tasks.filter((task) => task.workflow === workflow), anchor, mode),
+    ...taskDeliveryReport(
+      tasks.filter((task) => task.workflow === workflow),
+      anchor,
+      mode,
+    ),
   }));
   const roleRows = Object.keys(PIC)
     .map((role) => ({
@@ -2830,7 +3665,11 @@ function DeliveryReport({ tasks }) {
       <p className="mb-4 text-sm font-medium text-violet-300">{periodLabel}</p>
       <div className="mb-4 flex flex-wrap gap-2 text-xs">
         {workTypeReports.map((item) => (
-          <span key={item.workflow} className="rounded-full px-3 py-1.5" style={pillStyle(WORKFLOW_META[item.workflow].color)}>
+          <span
+            key={item.workflow}
+            className="rounded-full px-3 py-1.5"
+            style={pillStyle(WORKFLOW_META[item.workflow].color)}
+          >
             {WORKFLOW_META[item.workflow].label}: {item.done}/{item.total} done
           </span>
         ))}
@@ -4526,11 +5365,22 @@ export function saveRecord(data, kind, input) {
     if (!["normal", "urgent"].includes(record.priority))
       throw new Error("Priority tidak valid.");
     numberCheck(record.cycle, "Cycle delivery", 999, true);
-    record.checklist = (record.checklist || []).map((item) => ({
-      ...(item.id ? { id: item.id } : {}),
-      label: String(item.label || "").trim(),
-      completed: !!item.completed,
-    })).filter((item) => item.label);
+    record.checklist = (record.checklist || [])
+      .map((item) => ({
+        ...(item.id ? { id: item.id } : {}),
+        label: String(item.label || "").trim(),
+        picRole: item.picRole,
+        due: item.due,
+        dueTime: item.dueTime || null,
+        completed: !!item.completed,
+      }))
+      .filter((item) => item.label);
+    record.checklist.forEach((item, index) => {
+      if (!PIC[item.picRole])
+        throw new Error(`Pilih PIC untuk checklist ${index + 1}.`);
+      validDate(item.due, `Deadline checklist ${index + 1}`);
+      item.position = index;
+    });
     record.createdAt = existing?.createdAt || record.createdAt || todayISO();
     if (record.status === "done") {
       record.completedAt =
@@ -4732,14 +5582,34 @@ function OpsProvider({
     feedback: serverOperations.feedback || [],
     users: serverUsers,
     team:
-      serverTeam ||
-      createTeamSeed(serverUsers, serverOperations.clients || []),
+      serverTeam || createTeamSeed(serverUsers, serverOperations.clients || []),
   });
   const [data, setData] = useState(incomingData);
   const dataRef = useRef(data);
   const [editor, setEditor] = useState(null);
   const [confirm, setConfirm] = useState(null);
-  const [notice, setNotice] = useState(flash.success || "");
+  const [toasts, setToasts] = useState([]);
+  const toastIdRef = useRef(0);
+  const addToast = useCallback((message, type = "success") => {
+    const id = ++toastIdRef.current;
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, exiting: true } : t)),
+      );
+      setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+      }, 350);
+    }, 4000);
+  }, []);
+  const dismissToast = useCallback((id) => {
+    setToasts((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, exiting: true } : t)),
+    );
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 350);
+  }, []);
   const currentUser = authUser ? { ...authUser, active: true } : null;
   const can = (action, resource) =>
     currentUser
@@ -4752,9 +5622,8 @@ function OpsProvider({
     setData(next);
   }, [serverOperations, serverUsers, serverTeam]);
 
-  useEffect(() => {
-    setNotice(flash.success || "");
-  }, [flash.success]);
+  // Toast from server flash is not needed — we call addToast() directly in each action.
+  // This prevents double toast notifications.
 
   function login(email, password, callbacks = {}) {
     router.post(
@@ -4814,7 +5683,7 @@ function OpsProvider({
         : validated;
 
     await inertiaMutation(url, method, payload);
-    setNotice(`${KIND_LABEL[kind]} berhasil disimpan.`);
+    addToast(`${KIND_LABEL[kind]} berhasil disimpan.`);
     setEditor(null);
   }
 
@@ -4823,14 +5692,14 @@ function OpsProvider({
     if (!dataRef.current.feedback.some((item) => item.id === id))
       throw new Error("Feedback tidak tersedia.");
     await inertiaMutation(`/feedback/${id}/action`, "patch", { action });
-    setNotice("Tindak lanjut feedback berhasil diperbarui.");
+    addToast("Tindak lanjut feedback berhasil diperbarui.");
     setEditor(null);
   }
 
   async function remove(kind, id) {
     if (!can("delete", kind)) accessDenied();
     await inertiaMutation(`/${kind}/${id}`, "delete");
-    setNotice(`${KIND_LABEL[kind]} berhasil dihapus.`);
+    addToast(`${KIND_LABEL[kind]} berhasil dihapus.`);
     setConfirm(null);
   }
 
@@ -4841,28 +5710,33 @@ function OpsProvider({
     );
     if (!task) throw new Error("Task tidak tersedia.");
     await inertiaMutation(`/tasks/${id}/status`, "patch", { status });
-    setNotice(
-      "Status task diperbarui; Operations Hub dan kalender ikut berubah.",
-    );
   }
 
   async function toggleChecklist(taskId, itemId, completed) {
-    if (!can("update", "tasks")) accessDenied();
-    await inertiaMutation(`/tasks/${taskId}/checklist/${itemId}`, "patch", { completed });
-    setNotice("Checklist task diperbarui.");
+    await inertiaMutation(
+      `/tasks/${taskId}/checklist/${itemId}/status`,
+      "patch",
+      { completed },
+    );
+  }
+
+  async function toggleDirectTask(taskId, completed) {
+    await inertiaMutation(`/tasks/${taskId}/status`, "patch", {
+      status: completed ? "done" : "in-progress",
+    });
   }
 
   async function saveTaskChecklist(taskId, checklist) {
     if (!can("update", "tasks")) accessDenied();
-    await inertiaMutation(`/tasks/${taskId}/checklist`, "patch", { checklist });
-    setNotice("Susunan checklist berhasil diperbarui.");
+    await inertiaMutation(`/tasks/${taskId}/checklist`, "put", { checklist });
+    addToast("Susunan checklist berhasil diperbarui.");
   }
 
   async function teamDispatch(command) {
     if (command.type === "save") {
       if (!can("submit", "team-reports")) accessDenied();
       await inertiaMutation("/team-reports", "post", command.report);
-      setNotice("Team Performance KPI diperbarui.");
+      addToast("Team Performance KPI diperbarui.");
       return;
     }
     if (command.type === "save-definition") {
@@ -4878,7 +5752,7 @@ function OpsProvider({
         exists ? "put" : "post",
         definition,
       );
-      setNotice("Pengaturan KPI diperbarui.");
+      addToast("Pengaturan KPI diperbarui.");
       return;
     }
     if (command.type === "delete-definition") {
@@ -4887,7 +5761,7 @@ function OpsProvider({
         `/team-kpi-definitions/${command.definitionId}`,
         "delete",
       );
-      setNotice("KPI berhasil dihapus. Riwayat lama tetap utuh.");
+      addToast("KPI berhasil dihapus. Riwayat lama tetap utuh.");
       return;
     }
     throw new Error("Tindakan Team Performance tidak tersedia.");
@@ -4900,7 +5774,7 @@ function OpsProvider({
       abilities: profile.abilities,
       reportRoles: profile.reportRoles,
     });
-    setNotice(`Permission ${PIC[profile.role].name} berhasil diperbarui.`);
+    addToast(`Permission ${PIC[profile.role].name} berhasil diperbarui.`);
   }
 
   useEffect(() => {
@@ -4920,14 +5794,18 @@ function OpsProvider({
       title: "Read current role permissions",
       description:
         "Read the signed-in PBM Ops role, visible tabs, and allowed data changes.",
-      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      inputSchema: {
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      },
       annotations: { readOnlyHint: true, untrustedContentHint: false },
       execute() {
         return {
           role: PIC[currentUser.role].name,
-          visibleTabs: TAB_META.filter((tab) =>
-            can("view", tab.id),
-          ).map((tab) => tab.label),
+          visibleTabs: TAB_META.filter((tab) => can("view", tab.id)).map(
+            (tab) => tab.label,
+          ),
           abilities: serverPermissions.current?.abilities || [],
           readableReportRoles: serverPermissions.current?.reportRoles || [],
         };
@@ -4962,7 +5840,9 @@ function OpsProvider({
     login,
     logout,
     storageError: "",
-    notice,
+    toasts,
+    addToast,
+    dismissToast,
     editor,
     setEditor,
     confirm,
@@ -4979,6 +5859,7 @@ function OpsProvider({
     remove,
     moveTask,
     toggleChecklist,
+    toggleDirectTask,
     saveTaskChecklist,
     saveRolePermissions,
   };
@@ -5118,7 +5999,7 @@ function defaultRecord(kind, data, preset = {}) {
       due: todayISO(),
       cycle: 0,
       priority: "normal",
-      checklist: checklistFor("build"),
+      checklist: checklistFor("build", "project-manager", todayISO()),
       brief: "",
       blocked: false,
       createdAt: todayISO(),
@@ -5307,13 +6188,43 @@ function RecordEditor({ kind, record, preset, onClose }) {
       if (kind === "tasks") {
         initial.workflow ||= "build";
         initial.pics = taskPics(initial);
-        initial.checklist ||= checklistFor(initial.workflow);
+        initial.checklist ||= checklistFor(
+          initial.workflow,
+          initial.pics[0],
+          initial.due,
+        );
+        initial.checklist = initial.checklist.map((item, position) => ({
+          ...item,
+          picRole: item.picRole || initial.pics[0],
+          due: item.due || initial.due,
+          dueTime: item.dueTime || null,
+          position,
+        }));
       }
       return initial;
     }),
     [error, setError] = useState(""),
     [saving, setSaving] = useState(false);
   const set = (key, value) => setDraft((d) => ({ ...d, [key]: value }));
+  const updateTaskChecklistDraft = (index, patch) =>
+    setDraft((current) => ({
+      ...current,
+      checklist: current.checklist.map((entry, itemIndex) =>
+        itemIndex === index ? { ...entry, ...patch } : entry,
+      ),
+    }));
+  const moveTaskChecklistDraft = (fromIndex, toIndex) => {
+    if (toIndex < 0 || toIndex >= (draft.checklist || []).length) return;
+    setDraft((current) => {
+      const checklist = [...current.checklist];
+      const [moved] = checklist.splice(fromIndex, 1);
+      checklist.splice(toIndex, 0, moved);
+      return {
+        ...current,
+        checklist: checklist.map((item, position) => ({ ...item, position })),
+      };
+    });
+  };
   const field = (key, label, type = "text", extra = {}) => (
     <InputField
       key={key}
@@ -5425,7 +6336,11 @@ function RecordEditor({ kind, record, preset, onClose }) {
                   {clientField()}
                   {field("due", "Deadline", "date", { required: true })}
                   <div className="sm:col-span-2">
-                    {field("brief", "Brief / detail task (opsional)", "textarea")}
+                    {field(
+                      "brief",
+                      "Brief / detail task (opsional)",
+                      "textarea",
+                    )}
                   </div>
                 </div>
               </section>
@@ -5435,13 +6350,21 @@ function RecordEditor({ kind, record, preset, onClose }) {
                   <span className="task-form-step">2</span>
                   <div>
                     <h3>Jenis pekerjaan</h3>
-                    <p>Pilih kategori yang paling sesuai. Semua kategori memakai status yang sama.</p>
+                    <p>
+                      Pilih kategori yang paling sesuai. Semua kategori memakai
+                      status yang sama.
+                    </p>
                   </div>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-3">
                   {Object.entries(WORKFLOW_META).map(([value, meta]) => {
                     const selected = (draft.workflow || "build") === value;
-                    const Icon = value === "quick" ? Zap : value === "optimization" ? TrendingUp : LayoutGrid;
+                    const Icon =
+                      value === "quick"
+                        ? Zap
+                        : value === "optimization"
+                          ? TrendingUp
+                          : LayoutGrid;
                     return (
                       <label
                         key={value}
@@ -5460,7 +6383,11 @@ function RecordEditor({ kind, record, preset, onClose }) {
                               ...current,
                               workflow: value,
                               status: "intake",
-                              checklist: checklistFor(value),
+                              checklist: checklistFor(
+                                value,
+                                current.pics?.[0] || "project-manager",
+                                current.due,
+                              ),
                             }))
                           }
                         />
@@ -5477,28 +6404,176 @@ function RecordEditor({ kind, record, preset, onClose }) {
                 </div>
                 {record && (
                   <div className="mt-4 max-w-sm">
-                    {field("status", "Status", "text", { options: STATUSES.map((status) => ({ value: status.id, label: status.label })) })}
+                    {field("status", "Status", "text", {
+                      options: STATUSES.map((status) => ({
+                        value: status.id,
+                        label: status.label,
+                      })),
+                    })}
                   </div>
                 )}
                 <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-950/50 p-4">
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <div>
-                      <p className="text-sm font-medium text-zinc-200">Checklist proses</p>
-                      <p className="mt-1 text-xs text-zinc-500">Langkah kerja otomatis sesuai jenis pekerjaan dan dapat disesuaikan.</p>
+                      <p className="text-sm font-medium text-zinc-200">
+                        Checklist proses
+                      </p>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        Langkah kerja otomatis sesuai jenis pekerjaan dan dapat
+                        disesuaikan.
+                      </p>
                     </div>
-                    <button type="button" className="ops-button" onClick={() => set("checklist", [...(draft.checklist || []), { label: "", completed: false }])}>+ Langkah</button>
+                    <button
+                      type="button"
+                      className="ops-button"
+                      onClick={() =>
+                        set("checklist", [
+                          ...(draft.checklist || []),
+                          {
+                            label: "",
+                            picRole: draft.pics?.[0] || "project-manager",
+                            due: draft.due,
+                            dueTime: null,
+                            completed: false,
+                            position: draft.checklist?.length || 0,
+                          },
+                        ])
+                      }
+                    >
+                      + Langkah
+                    </button>
                   </div>
                   {draft.checklist?.length ? (
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       {draft.checklist.map((item, index) => (
-                        <div key={item.id || index} className="flex items-center gap-2">
-                          <input className="min-w-0 flex-1" value={item.label} placeholder={`Langkah ${index + 1}`} onChange={(event) => set("checklist", draft.checklist.map((entry, itemIndex) => itemIndex === index ? { ...entry, label: event.target.value } : entry))} />
-                          <button type="button" className="ops-button ops-danger" aria-label={`Hapus langkah ${index + 1}`} onClick={() => set("checklist", draft.checklist.filter((_, itemIndex) => itemIndex !== index))}>×</button>
+                        <div
+                          key={item.id || index}
+                          className="task-form-checklist-row"
+                        >
+                          <div className="task-checklist-row-left">
+                            <span className="task-checklist-number">
+                              {index + 1}
+                            </span>
+                          </div>
+                          <div className="task-checklist-item-body">
+                            <textarea
+                              rows={2}
+                              className="task-checklist-textarea"
+                              value={item.label}
+                              placeholder={`Nama langkah ${index + 1}`}
+                              aria-label={`Nama langkah ${index + 1}`}
+                              onChange={(event) =>
+                                updateTaskChecklistDraft(index, {
+                                  label: event.target.value,
+                                })
+                              }
+                            />
+                            <div className="task-checklist-meta-row">
+                              <div className="task-checklist-meta-item">
+                                <span className="task-checklist-meta-label">PIC</span>
+                                <select
+                                  value={item.picRole || ""}
+                                  aria-label={`PIC langkah ${index + 1}`}
+                                  onChange={(event) =>
+                                    updateTaskChecklistDraft(index, {
+                                      picRole: event.target.value,
+                                    })
+                                  }
+                                >
+                                  <option value="" disabled>
+                                    Pilih PIC
+                                  </option>
+                                  {Object.entries(PIC).map(([role, person]) => (
+                                    <option key={role} value={role}>
+                                      {person.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div className="task-checklist-meta-item">
+                                <span className="task-checklist-meta-label">Deadline</span>
+                                <div className="task-checklist-date-time-group">
+                                  <input
+                                    type="date"
+                                    value={item.due || ""}
+                                    aria-label={`Deadline langkah ${index + 1}`}
+                                    onChange={(event) =>
+                                      updateTaskChecklistDraft(index, {
+                                        due: event.target.value,
+                                      })
+                                    }
+                                  />
+                                  <input
+                                    type="time"
+                                    className="task-checklist-time-input"
+                                    value={item.dueTime || ""}
+                                    aria-label={`Jam deadline langkah ${index + 1}`}
+                                    placeholder="--:--"
+                                    onChange={(event) =>
+                                      updateTaskChecklistDraft(index, {
+                                        dueTime: event.target.value || null,
+                                      })
+                                    }
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                            {item.due && draft.due && item.due > draft.due && (
+                              <p className="task-checklist-warning">
+                                ⚠️ Deadline langkah melewati deadline task ({formatDate(draft.due)}).
+                              </p>
+                            )}
+                          </div>
+                          <div className="task-checklist-edit-actions">
+                            <button
+                              type="button"
+                              className="ops-icon-button"
+                              disabled={index === 0}
+                              aria-label={`Naikkan langkah ${index + 1}`}
+                              onClick={() =>
+                                moveTaskChecklistDraft(index, index - 1)
+                              }
+                              title="Naikkan langkah"
+                            >
+                              <ArrowUp className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              className="ops-icon-button"
+                              disabled={index === draft.checklist.length - 1}
+                              aria-label={`Turunkan langkah ${index + 1}`}
+                              onClick={() =>
+                                moveTaskChecklistDraft(index, index + 1)
+                              }
+                              title="Turunkan langkah"
+                            >
+                              <ArrowDown className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              className="ops-button ops-danger task-checklist-delete-btn"
+                              aria-label={`Hapus langkah ${index + 1}`}
+                              onClick={() =>
+                                set(
+                                  "checklist",
+                                  draft.checklist.filter(
+                                    (_, itemIndex) => itemIndex !== index,
+                                  ),
+                                )
+                              }
+                              title="Hapus langkah"
+                            >
+                              Hapus
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <p className="text-sm text-zinc-500">Quick task tidak memiliki checklist bawaan. Tambahkan langkah jika dibutuhkan.</p>
+                    <p className="text-sm text-zinc-500">
+                      Quick task tidak memiliki checklist bawaan. Tambahkan
+                      langkah jika dibutuhkan.
+                    </p>
                   )}
                 </div>
               </section>
@@ -5522,7 +6597,10 @@ function RecordEditor({ kind, record, preset, onClose }) {
                   <span className="task-form-step">4</span>
                   <div>
                     <h3>Pengaturan tambahan</h3>
-                    <p>Atur prioritas, cycle, dan kondisi blocker bila diperlukan.</p>
+                    <p>
+                      Atur prioritas, cycle, dan kondisi blocker bila
+                      diperlukan.
+                    </p>
                   </div>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -5542,14 +6620,13 @@ function RecordEditor({ kind, record, preset, onClose }) {
                     <input
                       type="checkbox"
                       checked={!!draft.blocked}
-                      onChange={(event) =>
-                        set("blocked", event.target.checked)
-                      }
+                      onChange={(event) => set("blocked", event.target.checked)}
                     />
                     <span>
                       <strong>Task sedang terhambat</strong>
                       <small>
-                        Aktifkan jika task belum dapat dikerjakan karena blocker.
+                        Aktifkan jika task belum dapat dikerjakan karena
+                        blocker.
                       </small>
                     </span>
                   </label>
@@ -5993,8 +7070,8 @@ function RolePermissionEditor({ profile, onClose, onSave }) {
       onClose={saving ? () => {} : onClose}
     >
       <p className="mb-5 text-sm leading-6 text-zinc-400">
-        Atur tab, tindakan, dan cakupan rekap Team Performance untuk seluruh user
-        dengan role ini.
+        Atur tab, tindakan, dan cakupan rekap Team Performance untuk seluruh
+        user dengan role ini.
       </p>
       {error && (
         <p className="mb-4 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">
@@ -6187,53 +7264,53 @@ function UserManager() {
       )}
       {canManagePermissions && (
         <div className="overflow-x-auto rounded-xl border border-zinc-800">
-        <table className="w-full min-w-[760px] text-left text-sm">
-          <thead className="bg-zinc-900 text-zinc-400">
-            <tr>
-              <th className="p-4">Role</th>
-              <th className="p-4">Tab</th>
-              <th className="p-4">Hak perubahan</th>
-              <th className="p-4">Cakupan rekap KPI</th>
-              <th className="p-4">Aksi</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rolePermissions.map((profile) => (
-              <tr key={profile.role} className="border-t border-zinc-800">
-                <td className="p-4 font-medium text-zinc-100">
-                  {PIC[profile.role].name}
-                </td>
-                <td className="p-4 text-zinc-400">
-                  {TAB_META.filter((tab) => profile.tabs.includes(tab.id))
-                    .map((tab) => tab.label)
-                    .join(", ") || "Tidak ada"}
-                </td>
-                <td className="p-4 text-zinc-400">
-                  {ABILITY_META.filter((item) =>
-                    profile.abilities.includes(item.id),
-                  )
-                    .map((item) => item.label)
-                    .join(", ") || "Lihat saja"}
-                </td>
-                <td className="p-4 text-zinc-400">
-                  {profile.reportRoles
-                    .map((role) => PIC[role]?.name)
-                    .filter(Boolean)
-                    .join(", ")}
-                </td>
-                <td className="p-4">
-                  <button
-                    className="ops-button"
-                    onClick={() => setEditingPermission(profile)}
-                  >
-                    Edit permission
-                  </button>
-                </td>
+          <table className="w-full min-w-[760px] text-left text-sm">
+            <thead className="bg-zinc-900 text-zinc-400">
+              <tr>
+                <th className="p-4">Role</th>
+                <th className="p-4">Tab</th>
+                <th className="p-4">Hak perubahan</th>
+                <th className="p-4">Cakupan rekap KPI</th>
+                <th className="p-4">Aksi</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {rolePermissions.map((profile) => (
+                <tr key={profile.role} className="border-t border-zinc-800">
+                  <td className="p-4 font-medium text-zinc-100">
+                    {PIC[profile.role].name}
+                  </td>
+                  <td className="p-4 text-zinc-400">
+                    {TAB_META.filter((tab) => profile.tabs.includes(tab.id))
+                      .map((tab) => tab.label)
+                      .join(", ") || "Tidak ada"}
+                  </td>
+                  <td className="p-4 text-zinc-400">
+                    {ABILITY_META.filter((item) =>
+                      profile.abilities.includes(item.id),
+                    )
+                      .map((item) => item.label)
+                      .join(", ") || "Lihat saja"}
+                  </td>
+                  <td className="p-4 text-zinc-400">
+                    {profile.reportRoles
+                      .map((role) => PIC[role]?.name)
+                      .filter(Boolean)
+                      .join(", ")}
+                  </td>
+                  <td className="p-4">
+                    <button
+                      className="ops-button"
+                      onClick={() => setEditingPermission(profile)}
+                    >
+                      Edit permission
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       {editingPermission && (
         <RolePermissionEditor
@@ -6349,7 +7426,9 @@ function AppShell() {
     permissionProfile,
     logout,
     storageError,
-    notice,
+    toasts,
+    dismissToast,
+    addToast,
     can,
     data,
     teamDispatch,
@@ -6551,9 +7630,9 @@ function AppShell() {
       </header>
 
       <main className="relative mx-auto max-w-[1400px] px-6 py-8">
-        {(storageError || notice) && (
-          <div className="mb-5 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-300">
-            <span role="status">{storageError || notice}</span>
+        {storageError && (
+          <div className="mb-5 rounded-lg border border-rose-800 bg-rose-950/50 px-3 py-2 text-xs text-rose-300">
+            <span role="alert">{storageError}</span>
           </div>
         )}
         {tab === "board" && (
@@ -6582,12 +7661,117 @@ function AppShell() {
         {tab === "users" && can("view", "users") && <UserManager />}
         <EditorHost />
       </main>
+
+      {/* Toast notification container - fixed top-right */}
+      {toasts.length > 0 && (
+        <div className="ops-toast-container">
+          {toasts.map((toast) => (
+            <div
+              key={toast.id}
+              className={`ops-toast ops-toast-${toast.type || "success"} ${toast.exiting ? "ops-toast-exit" : "ops-toast-enter"}`}
+              role="status"
+              aria-live="polite"
+            >
+              <div className="ops-toast-icon">
+                <CheckCircle2 className="h-4 w-4" />
+              </div>
+              <span className="ops-toast-message">{toast.message}</span>
+              <button
+                type="button"
+                className="ops-toast-close"
+                aria-label="Tutup notifikasi"
+                onClick={() => dismissToast(toast.id)}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 const APP_CSS =
-  ".pbm-prototype { color-scheme: dark; font-family: Inter, system-ui, sans-serif; background: #09090b; }\nbutton,select { cursor:pointer; }\nbutton:disabled { cursor:not-allowed; opacity:.45; }\ninput,select,textarea { color-scheme:dark; }\nbutton:focus-visible,a:focus-visible { outline:2px solid #a78bfa; outline-offset:3px; }\n.ops-dialog::backdrop { background:rgb(0 0 0 / .76); backdrop-filter:blur(4px); }\n.ops-dialog { margin:auto; max-height:90dvh; width:min(850px,calc(100% - 24px)); overflow:auto; border:1px solid #3f3f46; border-radius:20px; padding:24px; background:#09090b; color:#f4f4f5; }\n.ops-dialog input:not([type=radio]):not([type=checkbox]),.ops-dialog select,.ops-dialog textarea,.login-input { width:100%; background:#18181b; border:1px solid #3f3f46; border-radius:8px; padding:10px 12px; color:#f4f4f5; }\n.ops-dialog input:focus,.ops-dialog select:focus,.ops-dialog textarea:focus { border-color:#7c3aed; outline:none; box-shadow:0 0 0 3px rgb(124 58 237 / .13); }\n.ops-dialog label { display:grid; gap:7px; font-size:14px; color:#d4d4d8; }\n.ops-dialog textarea { min-height:88px; resize:vertical; }\n.ops-button { display:inline-flex; align-items:center; justify-content:center; gap:6px; border:1px solid #3f3f46; border-radius:8px; padding:8px 12px; font-size:14px; background:#18181b; color:#e4e4e7; }\n.ops-button:hover { background:#27272a; }\n.ops-primary { background:#4f39f6; border-color:#4f39f6; color:white; }\n.ops-primary:hover { background:#634efb; }\n.ops-danger { color:#fda4af; border-color:#9f1239; }\n.ops-empty { padding:32px; border:1px dashed #3f3f46; border-radius:12px; color:#a1a1aa; text-align:center; }\n.ops-dialog label.ops-inline-label { display:flex; align-items:center; gap:8px; }\n.ops-dialog-task { width:min(980px,calc(100% - 24px)); padding:0; overflow:hidden; }\n.ops-dialog-task>header { margin:0; padding:20px 24px; border-bottom:1px solid #27272a; background:#0c0c0f; }\n.task-editor-form { max-height:calc(90dvh - 73px); overflow-y:auto; padding:20px 24px 0; }\n.task-form-section { border:1px solid #27272a; border-radius:14px; background:rgb(24 24 27 / .55); padding:18px; }\n.task-form-section-heading { display:flex; align-items:flex-start; gap:11px; margin-bottom:16px; }\n.task-form-section-heading h3 { color:#f4f4f5; font-size:15px; font-weight:600; line-height:1.35; }\n.task-form-section-heading p { margin-top:2px; color:#71717a; font-size:12px; line-height:1.5; }\n.task-form-step { display:inline-flex; width:24px; height:24px; flex:0 0 24px; align-items:center; justify-content:center; border-radius:999px; background:rgb(124 58 237 / .16); color:#c4b5fd; font-size:11px; font-weight:700; }\n.task-workflow-option { display:flex !important; min-height:76px; grid-template-columns:none !important; align-items:center; gap:12px !important; border:1px solid #3f3f46; border-radius:10px; background:#111114; padding:13px; transition:.16s ease; }\n.task-workflow-option:hover { border-color:#52525b; background:#18181b; }\n.task-workflow-option-active { border-color:#7c3aed; background:rgb(124 58 237 / .1); box-shadow:inset 0 0 0 1px rgb(124 58 237 / .16); }\n.task-workflow-icon { display:inline-flex; width:34px; height:34px; flex:0 0 34px; align-items:center; justify-content:center; border-radius:9px; background:#27272a; color:#c4b5fd; }\n.task-workflow-option strong,.task-workflow-option small,.task-blocked-toggle strong,.task-blocked-toggle small { display:block; }\n.task-workflow-option strong { color:#f4f4f5; font-size:13px; }\n.task-workflow-option small { margin-top:3px; color:#71717a; font-size:11px; line-height:1.35; }\n.task-assignee-option { display:flex !important; grid-template-columns:none !important; }\n.task-blocked-toggle { display:flex !important; grid-template-columns:none !important; align-items:flex-start; gap:10px !important; border:1px solid #3f3f46; border-radius:10px; background:#111114; padding:12px 14px; }\n.task-blocked-toggle input { margin-top:3px; }\n.task-blocked-toggle strong { color:#e4e4e7; font-size:13px; }\n.task-blocked-toggle small { margin-top:2px; color:#71717a; font-size:11px; }\n.task-editor-footer { position:sticky; bottom:0; z-index:5; display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:8px; margin:24px -24px 0; border-top:1px solid #27272a; background:rgb(9 9 11 / .96); padding:15px 24px; backdrop-filter:blur(10px); }\n.ops-dialog-task-detail { width:min(760px,calc(100% - 24px)); }\n.task-detail-meta-row { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; margin-top:-6px; margin-bottom:18px; }\n.task-detail-summary-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px; }\n.task-detail-summary-card,.task-detail-section { border:1px solid #27272a; border-radius:12px; background:rgb(24 24 27 / .55); padding:15px; }\n.task-detail-section { margin-top:14px; }\n.task-detail-label { color:#71717a; font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; }\n.task-checklist-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }\n.task-checklist-list { overflow:hidden; border:1px solid #27272a; border-radius:10px; }\n.task-checklist-view-row { display:flex; align-items:center; gap:10px; min-height:44px; padding:9px 11px; border-bottom:1px solid #27272a; background:#111114; }\n.task-checklist-view-row:last-child { border-bottom:0; }\n.task-checklist-view-row input[type=checkbox],.task-checklist-edit-row input[type=checkbox] { width:16px; height:16px; flex:0 0 16px; accent-color:#34d399; }\n.task-checklist-number { display:flex; width:22px; height:22px; flex:0 0 22px; align-items:center; justify-content:center; border-radius:999px; background:#27272a; color:#a1a1aa; font-size:10px; font-weight:600; }\n.task-checklist-edit-row { display:grid; grid-template-columns:18px 1fr auto; align-items:center; gap:10px; }\n@media(max-width:640px) { main { padding:20px 12px !important; } .ops-dialog { padding:18px; } .ops-dialog-task { width:calc(100% - 12px); max-height:96dvh; padding:0; border-radius:16px; } .ops-dialog-task>header { padding:16px; } .task-editor-form { max-height:calc(96dvh - 65px); padding:16px 16px 0; } .task-form-section { padding:14px; } .task-editor-footer { margin:20px -16px 0; padding:12px 16px; } .task-editor-footer p { width:100%; } .task-detail-summary-grid { grid-template-columns:1fr; } .task-detail-meta-row { align-items:flex-start; } .task-checklist-view-row { padding:9px; } .task-checklist-edit-row { grid-template-columns:18px 1fr; } .task-checklist-edit-row .ops-danger { grid-column:2; justify-self:start; } }\n";
+  ".pbm-prototype { color-scheme: dark; font-family: Inter, system-ui, sans-serif; background: #09090b; }\nbutton,select { cursor:pointer; }\nbutton:disabled { cursor:not-allowed; opacity:.45; }\ninput,select,textarea { color-scheme:dark; }\nbutton:focus-visible,a:focus-visible { outline:2px solid #a78bfa; outline-offset:3px; }\n.ops-dialog::backdrop { background:rgb(0 0 0 / .76); backdrop-filter:blur(4px); }\n.ops-dialog { margin:auto; max-height:90dvh; width:min(850px,calc(100% - 24px)); overflow:auto; border:1px solid #3f3f46; border-radius:20px; padding:24px; background:#09090b; color:#f4f4f5; }\n.ops-dialog input:not([type=radio]):not([type=checkbox]),.ops-dialog select,.ops-dialog textarea,.login-input { width:100%; background:#18181b; border:1px solid #3f3f46; border-radius:8px; padding:10px 12px; color:#f4f4f5; }\n.ops-dialog input:focus,.ops-dialog select:focus,.ops-dialog textarea:focus { border-color:#7c3aed; outline:none; box-shadow:0 0 0 3px rgb(124 58 237 / .13); }\n.ops-dialog label { display:grid; gap:7px; font-size:14px; color:#d4d4d8; }\n.ops-dialog textarea { min-height:88px; resize:vertical; }\n.ops-button { display:inline-flex; align-items:center; justify-content:center; gap:6px; border:1px solid #3f3f46; border-radius:8px; padding:8px 12px; font-size:14px; background:#18181b; color:#e4e4e7; }\n.ops-button:hover { background:#27272a; }\n.ops-primary { background:#4f39f6; border-color:#4f39f6; color:white; }\n.ops-primary:hover { background:#634efb; }\n.ops-danger { color:#fda4af; border-color:#9f1239; }\n.ops-empty { padding:32px; border:1px dashed #3f3f46; border-radius:12px; color:#a1a1aa; text-align:center; }\n.ops-dialog label.ops-inline-label { display:flex; align-items:center; gap:8px; }\n.ops-dialog-task { width:min(980px,calc(100% - 24px)); padding:0; overflow:hidden; }\n.ops-dialog-task>header { margin:0; padding:20px 24px; border-bottom:1px solid #27272a; background:#0c0c0f; }\n.task-editor-form { max-height:calc(90dvh - 73px); overflow-y:auto; padding:20px 24px 0; }\n.task-form-section { border:1px solid #27272a; border-radius:14px; background:rgb(24 24 27 / .55); padding:18px; }\n.task-form-section-heading { display:flex; align-items:flex-start; gap:11px; margin-bottom:16px; }\n.task-form-section-heading h3 { color:#f4f4f5; font-size:15px; font-weight:600; line-height:1.35; }\n.task-form-section-heading p { margin-top:2px; color:#71717a; font-size:12px; line-height:1.5; }\n.task-form-step { display:inline-flex; width:24px; height:24px; flex:0 0 24px; align-items:center; justify-content:center; border-radius:999px; background:rgb(124 58 237 / .16); color:#c4b5fd; font-size:11px; font-weight:700; }\n.task-workflow-option { display:flex !important; min-height:76px; grid-template-columns:none !important; align-items:center; gap:12px !important; border:1px solid #3f3f46; border-radius:10px; background:#111114; padding:13px; transition:.16s ease; }\n.task-workflow-option:hover { border-color:#52525b; background:#18181b; }\n.task-workflow-option-active { border-color:#7c3aed; background:rgb(124 58 237 / .1); box-shadow:inset 0 0 0 1px rgb(124 58 237 / .16); }\n.task-workflow-icon { display:inline-flex; width:34px; height:34px; flex:0 0 34px; align-items:center; justify-content:center; border-radius:9px; background:#27272a; color:#c4b5fd; }\n.task-workflow-option strong,.task-workflow-option small,.task-blocked-toggle strong,.task-blocked-toggle small { display:block; }\n.task-workflow-option strong { color:#f4f4f5; font-size:13px; }\n.task-workflow-option small { margin-top:3px; color:#71717a; font-size:11px; line-height:1.35; }\n.task-assignee-option { display:flex !important; grid-template-columns:none !important; }\n.task-blocked-toggle { display:flex !important; grid-template-columns:none !important; align-items:flex-start; gap:10px !important; border:1px solid #3f3f46; border-radius:10px; background:#111114; padding:12px 14px; }\n.task-blocked-toggle input { margin-top:3px; }\n.task-blocked-toggle strong { color:#e4e4e7; font-size:13px; }\n.task-blocked-toggle small { margin-top:2px; color:#71717a; font-size:11px; }\n.task-editor-footer { position:sticky; bottom:0; z-index:5; display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:8px; margin:24px -24px 0; border-top:1px solid #27272a; background:rgb(9 9 11 / .96); padding:15px 24px; backdrop-filter:blur(10px); }\n.ops-dialog-task-detail { width:min(980px,calc(100% - 24px)); }\n.task-detail-meta-row { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; margin-top:-6px; margin-bottom:18px; }\n.task-detail-summary-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px; }\n.task-detail-summary-card,.task-detail-section { border:1px solid #27272a; border-radius:12px; background:rgb(24 24 27 / .55); padding:15px; }\n.task-detail-section { margin-top:14px; }\n.task-detail-label { color:#71717a; font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; }\n.task-checklist-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }\n.task-checklist-list { overflow:hidden; border:1px solid #27272a; border-radius:10px; }\n.task-checklist-view-row { display:flex; align-items:center; gap:10px; min-height:44px; padding:9px 11px; border-bottom:1px solid #27272a; background:#111114; }\n.task-checklist-view-row:last-child { border-bottom:0; }\n.task-checklist-view-row input[type=checkbox],.task-checklist-edit-row input[type=checkbox] { width:16px; height:16px; flex:0 0 16px; accent-color:#34d399; }\n.task-checklist-number { display:flex; width:22px; height:22px; flex:0 0 22px; align-items:center; justify-content:center; border-radius:999px; background:#27272a; color:#a1a1aa; font-size:10px; font-weight:600; }\n" +
+  /* Toast notification styles */
+  "@keyframes ops-toast-slide-in { from { transform:translateX(100%); opacity:0; } to { transform:translateX(0); opacity:1; } }\n" +
+  "@keyframes ops-toast-slide-out { from { transform:translateX(0); opacity:1; } to { transform:translateX(100%); opacity:0; } }\n" +
+  ".ops-toast-container { position:fixed; top:20px; right:20px; z-index:99999; display:flex; flex-direction:column; gap:10px; pointer-events:none; max-width:420px; }\n" +
+  ".ops-toast { pointer-events:auto; display:flex; align-items:center; gap:10px; min-width:320px; padding:14px 16px; border-radius:12px; border:1px solid; box-shadow:0 8px 32px rgb(0 0 0 / .45), 0 0 0 1px rgb(0 0 0 / .12); backdrop-filter:blur(16px); font-size:13px; font-weight:500; line-height:1.4; }\n" +
+  ".ops-toast-enter { animation:ops-toast-slide-in .35s cubic-bezier(.21,1.02,.73,1) forwards; }\n" +
+  ".ops-toast-exit { animation:ops-toast-slide-out .3s ease-in forwards; }\n" +
+  ".ops-toast-success { background:linear-gradient(135deg, #052e16 0%, #0a2a1b 100%); border-color:#16a34a; color:#86efac; }\n" +
+  ".ops-toast-icon { display:flex; align-items:center; justify-content:center; flex:0 0 22px; width:22px; height:22px; border-radius:6px; }\n" +
+  ".ops-toast-success .ops-toast-icon { background:rgb(22 163 106 / .25); color:#34d399; }\n" +
+  ".ops-toast-message { flex:1; min-width:0; color:#e2e8f0; }\n" +
+  ".ops-toast-close { flex:0 0 auto; display:flex; align-items:center; justify-content:center; width:24px; height:24px; border:none; border-radius:6px; background:transparent; color:#64748b; cursor:pointer; transition:all .15s ease; }\n" +
+  ".ops-toast-close:hover { background:rgb(255 255 255 / .1); color:#e2e8f0; }\n" +
+  "@media(max-width:640px) { .ops-toast-container { top:12px; right:12px; left:12px; max-width:none; } .ops-toast { min-width:0; } }\n" +
+  "@media(max-width:640px) { main { padding:20px 12px !important; } .ops-dialog { padding:18px; } .ops-dialog-task { width:calc(100% - 12px); max-height:96dvh; padding:0; border-radius:16px; } .ops-dialog-task>header { padding:16px; } .task-editor-form { max-height:calc(96dvh - 65px); padding:16px 16px 0; } .task-form-section { padding:14px; } .task-editor-footer { margin:20px -16px 0; padding:12px 16px; } .task-editor-footer p { width:100%; } .task-detail-summary-grid { grid-template-columns:1fr; } .task-detail-meta-row { align-items:flex-start; } .task-checklist-view-row { padding:9px; } }\n";
+const TASK_WORK_CSS = `
+.task-checklist-edit-row,
+.task-form-checklist-row { display:flex !important; gap:12px; padding:13px 15px; border:1px solid #27272a; border-radius:12px; background:#111114; align-items:flex-start; transition:border-color .15s ease, background-color .15s ease; }
+.task-checklist-edit-row:hover,
+.task-form-checklist-row:hover { border-color:#3f3f46; background:#141418; }
+.task-checklist-row-left { display:flex; align-items:center; gap:8px; padding-top:10px; flex:0 0 auto; }
+.task-checklist-drag { color:#52525b; cursor:grab; }
+.task-checklist-drag:active { cursor:grabbing; }
+.task-checklist-item-body { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:9px; }
+.task-checklist-textarea { width:100% !important; min-height:52px !important; height:52px !important; resize:vertical !important; padding:8px 12px !important; font-size:13px !important; line-height:1.4 !important; border:1px solid #3f3f46 !important; border-radius:8px !important; background:#18181b !important; color:#f4f4f5 !important; font-family:inherit !important; }
+.task-checklist-textarea:focus { border-color:#7c3aed !important; outline:none !important; box-shadow:0 0 0 3px rgb(124 58 237 / .15) !important; }
+.task-checklist-meta-row { display:flex; flex-wrap:wrap; align-items:center; gap:14px; }
+.task-checklist-meta-item { display:flex; align-items:center; gap:8px; }
+.task-checklist-meta-label { font-size:11px; font-weight:600; color:#71717a; text-transform:uppercase; letter-spacing:.05em; white-space:nowrap; }
+.task-checklist-meta-item select { min-width:140px; height:34px !important; padding:4px 10px !important; font-size:12px !important; border-radius:8px !important; border:1px solid #3f3f46 !important; background:#18181b !important; color:#f4f4f5 !important; }
+.task-checklist-date-time-group { display:flex; gap:6px; align-items:center; }
+.task-checklist-date-time-group input[type=date] { width:140px !important; min-width:140px !important; height:34px !important; padding:4px 10px !important; font-size:12px !important; border-radius:8px !important; border:1px solid #3f3f46 !important; background:#18181b !important; color:#f4f4f5 !important; }
+.task-checklist-time-input { width:85px !important; flex:0 0 85px !important; min-width:0 !important; height:34px !important; padding:4px 8px !important; font-size:12px !important; text-align:center; border-radius:8px !important; border:1px solid #3f3f46 !important; background:#18181b !important; color:#f4f4f5 !important; }
+.task-checklist-edit-actions { display:flex; align-items:center; gap:6px; flex:0 0 auto; padding-top:4px; }
+.task-checklist-delete-btn { height:34px !important; padding:0 12px !important; font-size:12px !important; font-weight:500; }
+.ops-icon-button { display:inline-flex; width:34px; height:34px; align-items:center; justify-content:center; border:1px solid #3f3f46; border-radius:8px; color:#a1a1aa; background:#18181b; }
+.ops-icon-button:hover { background:#27272a; color:#f4f4f5; }
+.ops-icon-button:disabled { opacity:.3; }
+.task-checklist-warning { color:#fbbf24; font-size:12px; margin:2px 0 0; display:flex; align-items:center; gap:4px; }
+.my-work-toolbar,.calendar-filters { display:flex; flex-wrap:wrap; align-items:end; gap:12px; border:1px solid #27272a; border-radius:12px; background:rgb(24 24 27 / .55); padding:14px; }
+.my-work-toolbar label,.calendar-filters label { display:grid; gap:6px; min-width:170px; color:#71717a; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; }
+.my-work-toolbar select,.calendar-filters select { border:1px solid #3f3f46; border-radius:8px; background:#09090b; padding:9px 11px; color:#e4e4e7; font-size:13px; text-transform:none; letter-spacing:0; }
+.my-work-toolbar .my-work-future-toggle { display:flex; min-width:auto; flex-direction:row; align-items:center; gap:8px; padding:9px 0; color:#a1a1aa; font-size:12px; font-weight:400; text-transform:none; letter-spacing:0; }
+.my-work-summary { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+.my-work-summary>div { display:flex; align-items:baseline; gap:9px; border:1px solid #27272a; border-radius:11px; background:#111114; padding:13px 15px; }
+.my-work-summary strong { color:#f4f4f5; font-size:20px; }
+.my-work-summary span { color:#71717a; font-size:12px; }
+.my-work-group { overflow:hidden; border:1px solid #27272a; border-radius:13px; background:#111114; }
+.my-work-group>header { display:flex; align-items:center; justify-content:space-between; gap:12px; border-bottom:1px solid #27272a; padding:13px 15px; }
+.my-work-group>header h2 { color:#f4f4f5; font-size:14px; font-weight:600; }
+.my-work-group>header p { margin-top:2px; color:#71717a; font-size:11px; }
+.my-work-group>header>span { display:inline-flex; min-width:25px; height:25px; align-items:center; justify-content:center; border-radius:999px; background:#27272a; color:#d4d4d8; font-size:11px; font-weight:600; }
+.my-work-group-rose { border-color:rgb(244 63 94 / .3); }
+.my-work-group-violet { border-color:rgb(124 58 237 / .35); }
+.my-work-item { display:flex; align-items:center; gap:12px; padding:12px 15px; border-bottom:1px solid #27272a; }
+.my-work-item:last-child { border-bottom:0; }
+.my-work-item:hover { background:#18181b; }
+.my-work-item-overdue { background:rgb(244 63 94 / .04); }
+.my-work-item>input { width:17px; height:17px; flex:0 0 17px; accent-color:#34d399; }
+.my-work-item-meta { display:flex; min-width:270px; align-items:center; justify-content:flex-end; gap:9px; font-size:11px; }
+.calendar-filters { margin-bottom:12px; padding:11px; }
+@media(max-width:760px) {
+  .task-checklist-edit-row,
+  .task-form-checklist-row { flex-direction:column; align-items:stretch; gap:12px; }
+  .task-checklist-row-left { padding-top:0; }
+  .task-checklist-item-body { width:100%; }
+  .task-checklist-edit-actions { width:100%; justify-content:flex-end; padding-top:8px; border-top:1px solid #27272a; }
+  .task-checklist-meta-row { flex-direction:column; align-items:stretch; gap:10px; }
+  .task-checklist-meta-item { justify-content:space-between; }
+  .task-checklist-meta-item select,
+  .task-checklist-date-time-group { flex:1; }
+  .task-checklist-date-time-group input[type=date] { flex:1; width:auto !important; }
+  .my-work-summary { grid-template-columns:1fr; }
+  .my-work-item { align-items:flex-start; }
+  .my-work-item-meta { min-width:0; flex-direction:column; align-items:flex-end; }
+}
+`;
+
 export default function App({
   authUser,
   serverUsers,
@@ -6605,7 +7789,7 @@ export default function App({
       serverPermissions={serverPermissions}
       flash={flash}
     >
-      <style>{APP_CSS}</style>
+      <style>{APP_CSS + TASK_WORK_CSS}</style>
       <AppShell />
     </OpsProvider>
   );

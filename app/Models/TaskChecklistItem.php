@@ -7,11 +7,16 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class TaskChecklistItem extends Model
 {
-    protected $fillable = ['label', 'completed', 'position'];
+    protected $fillable = ['label', 'pic_role', 'due', 'due_time', 'completed', 'completed_at', 'position'];
 
     protected function casts(): array
     {
-        return ['completed' => 'boolean', 'position' => 'integer'];
+        return [
+            'due' => 'date:Y-m-d',
+            'completed' => 'boolean',
+            'completed_at' => 'date:Y-m-d',
+            'position' => 'integer',
+        ];
     }
 
     public function task(): BelongsTo

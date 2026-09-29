@@ -50,7 +50,14 @@ class OperationalDataSeeder extends Seeder
             ];
             $task->checklistItems()->delete();
             $task->checklistItems()->createMany(array_map(
-                fn (string $label, int $position) => ['label' => $label, 'position' => $position, 'completed' => $done],
+                fn (string $label, int $position) => [
+                    'label' => $label,
+                    'pic_role' => $source['pic'],
+                    'due' => $source['due'],
+                    'position' => $position,
+                    'completed' => $done,
+                    'completed_at' => $done ? $source['due'] : null,
+                ],
                 $templates[$workflow],
                 array_keys($templates[$workflow]),
             ));
