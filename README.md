@@ -7,6 +7,7 @@ PBM Ops adalah aplikasi internal agency berbasis Laravel 12, Inertia, React 19, 
 - Execution Board dengan CRUD task, perpindahan ke seluruh status, kartu urgent, filter PIC dropdown, kalender, filter task Done, dan laporan delivery mingguan/bulanan.
 - Operations Hub yang memakai data task yang sama dengan Execution Board.
 - Client Performance KPI dengan CRUD cycle, Cycle 0 sebagai baseline launch pertama, dan banyak varian uji per cycle.
+- Dashboard Meta Ads bulanan dengan rincian harian yang diperbarui otomatis setiap hari.
 - Team Performance KPI sederhana untuk angka KPI serta hasil utama, penyebab target tidak tercapai, rencana minggu depan, dan keputusan yang dibutuhkan.
 - Riwayat KPI tim dengan bar chart dan pembatasan hierarki laporan.
 - KPI Settings dinamis dengan filter role dan penghapusan KPI tanpa merusak snapshot laporan lama.

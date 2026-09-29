@@ -19,7 +19,7 @@ class RolePermissionRequest extends FormRequest
 
         return [
             'tabs' => ['required', 'array', 'min:1'],
-            'tabs.*' => ['string', 'distinct', Rule::in(['board', 'hub', 'kpi', 'team', 'feedback', 'clients', 'users'])],
+            'tabs.*' => ['string', 'distinct', Rule::in(['board', 'hub', 'kpi', 'ads', 'team', 'feedback', 'clients', 'users'])],
             'abilities' => ['present', 'array'],
             'abilities.*' => ['string', 'distinct', Rule::in([
                 'clients.manage', 'tasks.manage', 'cycles.manage', 'feedback.manage', 'feedback.update_action',

@@ -29,7 +29,7 @@ class RolePermissionTest extends TestCase
         $coo = $this->user('coo@gmail.com');
         $developer = $this->user('developer@gmail.com');
         $payload = [
-            'tabs' => ['board', 'hub', 'team', 'feedback', 'clients'],
+            'tabs' => ['board', 'hub', 'ads', 'team', 'feedback', 'clients'],
             'abilities' => ['clients.manage', 'feedback.update_action', 'team_reports.submit'],
             'reportRoles' => ['developer', 'creative'],
         ];
@@ -38,6 +38,7 @@ class RolePermissionTest extends TestCase
 
         $profile = RolePermission::forRole('developer');
         $this->assertTrue($profile->allowsTab('hub'));
+        $this->assertTrue($profile->allowsTab('ads'));
         $this->assertTrue($profile->allows('clients.manage'));
         $this->assertContains('developer', $profile->readableTeamRoles());
         $this->assertContains('creative', $profile->readableTeamRoles());
