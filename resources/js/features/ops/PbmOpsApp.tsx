@@ -39,6 +39,7 @@ import {
   LogOut,
   GripVertical,
   ListChecks,
+  BarChart3,
 } from "lucide-react";
 import {
   PieChart,
@@ -7509,6 +7510,14 @@ function AppShell() {
           </nav>
 
           <div className="flex items-center gap-2">
+            <a
+              href="/analytics"
+              className="inline-flex items-center gap-1.5 rounded-full border border-indigo-500/30 bg-indigo-950/40 px-3 py-1 text-xs font-medium text-indigo-300 hover:bg-indigo-900/50 hover:text-white transition"
+              title="Centralized Web Analytics"
+            >
+              <BarChart3 className="h-3.5 w-3.5 text-indigo-400" />
+              <span>Web Analytics</span>
+            </a>
             <span
               className="flex h-7 w-7 items-center justify-center rounded-full bg-zinc-800 text-zinc-300"
               style={{ fontSize: 11, fontWeight: 500 }}

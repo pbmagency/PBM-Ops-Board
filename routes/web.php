@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
+use App\Http\Controllers\CentralizedAnalyticsController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\OperationsController;
 use App\Http\Controllers\RolePermissionController;
@@ -8,7 +9,11 @@ use App\Http\Controllers\TeamPerformanceController;
 use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
 
+// Public routes (no login required)
 Route::get('/', DashboardController::class)->name('home');
+Route::get('/analytics', [CentralizedAnalyticsController::class, 'index'])->name('analytics.index');
+Route::get('/analytics/export', [CentralizedAnalyticsController::class, 'export'])->name('analytics.export');
+
 Route::post('/login', [AuthenticatedSessionController::class, 'store'])->middleware('guest')->name('login');
 Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->middleware('auth')->name('logout');
 Route::middleware('auth')->group(function () {
