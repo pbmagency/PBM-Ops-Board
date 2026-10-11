@@ -61,13 +61,18 @@ class CentralizedFeedFetcherService
         }
 
         try {
-            $response = Http::timeout(10)
-                ->withHeaders([
-                    'Accept' => 'application/json',
-                ])
-                ->get($config['url'], [
-                    'range' => $rangeDays,
+            $request = Http::timeout(10)->acceptJson();
+            $originIp = config("analytics.feed_origin_ips.{$projectKey}");
+            if (is_string($originIp) && $originIp !== '') {
+                $host = parse_url($config['url'], PHP_URL_HOST);
+                if (! is_string($host) || parse_url($config['url'], PHP_URL_SCHEME) !== 'https') {
+                    throw new Exception('Fullbright feed origin requires an HTTPS URL.');
+                }
+                $request = $request->withOptions([
+                    'curl' => [CURLOPT_RESOLVE => ["{$host}:443:{$originIp}"]],
                 ]);
+            }
+            $response = $request->get($config['url'], ['range' => $rangeDays]);
 
             if ($response->successful()) {
                 $data = $response->json();

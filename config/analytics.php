@@ -9,4 +9,7 @@ return [
         'ecourse-ka-tsan' => env('FEED_URL_ECOURSE_KA_TSAN', 'https://gumpreneur.id/api/analytics/feed'),
         'project-fullbright' => env('FEED_URL_PROJECT_FULLBRIGHT', 'https://toefl.fullbrightindonesia.org/ops-analytics/feed'),
     ],
+    'feed_origin_ips' => [
+        'project-fullbright' => env('FEED_ORIGIN_IP_PROJECT_FULLBRIGHT', '127.0.0.1'),
+    ],
 ];

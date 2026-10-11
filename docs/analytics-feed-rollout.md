@@ -5,7 +5,7 @@ The Board dashboard reads version 2 of the analytics feeds from five project sit
 ## Required production configuration
 
 - The five feed endpoints are public read-only GET APIs with aggregate analytics only. Visitor session IDs and individual events are excluded. The Board's legacy batch-write endpoint remains protected separately.
-- Check `FEED_URL_PROJECT_PBM`, `FEED_URL_LP_GORDEN`, `FEED_URL_LP_MENJANGAN`, `FEED_URL_ECOURSE_KA_TSAN`, and `FEED_URL_PROJECT_FULLBRIGHT` on the Board. Defaults live in `config/analytics.php`. Fullbright uses `/ops-analytics/feed` because its public `/api/*` path is handled by Nexus; `new-fullbright` deploys to staging.
+- Check `FEED_URL_PROJECT_PBM`, `FEED_URL_LP_GORDEN`, `FEED_URL_LP_MENJANGAN`, `FEED_URL_ECOURSE_KA_TSAN`, and `FEED_URL_PROJECT_FULLBRIGHT` on the Board. Defaults live in `config/analytics.php`. Fullbright uses `/ops-analytics/feed` and the Board resolves that HTTPS host to `127.0.0.1` because the public domain is routed through Scalev while its Laravel analytics app shares the Board VPS. Set `FEED_ORIGIN_IP_PROJECT_FULLBRIGHT` if the origin moves. `new-fullbright` deploys to staging.
 - Ensure the Laravel scheduler runs on the Board for the five-minute prefetch. On-demand page requests still work if the scheduler is unavailable.
 - Rebuild Laravel configuration caches after changing `.env` values.
 
