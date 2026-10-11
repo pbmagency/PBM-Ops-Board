@@ -76,6 +76,6 @@ class CentralizedAnalyticsFeedTest extends TestCase
                 ->where('stats.total_visits', 9)
                 ->where('availableProjects', ['project-fullbright']));
 
-        Http::assertSent(fn ($request) => str_contains($request->url(), 'toefl.fullbrightindonesia.org/api/analytics/feed'));
+        Http::assertSent(fn ($request) => str_contains($request->url(), 'toefl.fullbrightindonesia.org/ops-analytics/feed'));
     }
 }
