@@ -424,6 +424,7 @@ export default function CentralizedAnalytics({
                         { key: "lp-gorden", label: "LP Gorden" },
                         { key: "lp-menjangan", label: "LP Menjangan" },
                         { key: "ecourse-ka-tsan", label: "Ecourse Ka Tsan" },
+                        { key: "project-fullbright", label: "Fullbright TOEFL" },
                       ].map((item) => (
                         <button
                           key={item.key}
@@ -695,6 +696,7 @@ export default function CentralizedAnalytics({
                   { key: "lp-gorden", name: "LP Gorden" },
                   { key: "lp-menjangan", name: "LP Menjangan" },
                   { key: "project-pbm", name: "Project PBM" },
+                  { key: "project-fullbright", name: "Fullbright TOEFL" },
                 ].map((p) => {
                   const status = syncStatuses[p.key];
                   const isSelected = selectedProject === p.key;
@@ -980,7 +982,7 @@ export default function CentralizedAnalytics({
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h3 className="text-sm font-semibold text-white">
-                    Perbandingan Performa Antar 4 Proyek Web
+                    Perbandingan Performa Antar 5 Proyek Web
                   </h3>
                   <p className="text-xs text-zinc-400">
                     Perbandingan metrik utama dari masing-masing platform

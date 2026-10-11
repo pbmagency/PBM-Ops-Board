@@ -39,6 +39,7 @@ class CentralizedAnalytic extends Model
             'lp-gorden' => 'LP Gorden',
             'lp-menjangan' => 'LP Menjangan',
             'project-pbm' => 'Project PBM',
+            'project-fullbright' => 'Fullbright TOEFL',
         ];
     }
 }

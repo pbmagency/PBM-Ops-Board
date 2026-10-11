@@ -7,5 +7,6 @@ return [
         'lp-gorden' => env('FEED_URL_LP_GORDEN', 'https://toko.gordenwallpapersolo.com/api/analytics/feed'),
         'lp-menjangan' => env('FEED_URL_LP_MENJANGAN', 'https://menjangansnorkelingtripanddiving.com/api/analytics/feed'),
         'ecourse-ka-tsan' => env('FEED_URL_ECOURSE_KA_TSAN', 'https://gumpreneur.id/api/analytics/feed'),
+        'project-fullbright' => env('FEED_URL_PROJECT_FULLBRIGHT', 'https://toefl.fullbrightindonesia.org/api/analytics/feed'),
     ],
 ];

@@ -56,4 +56,26 @@ class CentralizedAnalyticsFeedTest extends TestCase
                 ->where('stats.total_visits', 0)
                 ->where('availableProjects', []));
     }
+
+    public function test_fullbright_is_available_as_a_project(): void
+    {
+        Http::fake(fn () => Http::response([
+            'success' => true,
+            'schema_version' => 2,
+            'stats' => ['total_visits' => 9, 'unique_visitors' => 8],
+            'performance_matrix' => [],
+            'chart_data' => [],
+            'referral_data' => [],
+            'utm_campaign_data' => [],
+        ]));
+
+        $this->get('/analytics?project=project-fullbright&range=7')->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('Analytics/CentralizedAnalytics')
+                ->where('selectedProject', 'project-fullbright')
+                ->where('stats.total_visits', 9)
+                ->where('availableProjects', ['project-fullbright']));
+
+        Http::assertSent(fn ($request) => str_contains($request->url(), 'toefl.fullbrightindonesia.org/api/analytics/feed'));
+    }
 }

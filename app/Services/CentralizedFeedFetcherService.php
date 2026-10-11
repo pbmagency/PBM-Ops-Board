@@ -35,6 +35,10 @@ class CentralizedFeedFetcherService
                 'name' => 'Ecourse Ka Tsan',
                 'url' => config('analytics.feed_urls.ecourse-ka-tsan'),
             ],
+            'project-fullbright' => [
+                'name' => 'Fullbright TOEFL',
+                'url' => config('analytics.feed_urls.project-fullbright'),
+            ],
         ];
     }
 
